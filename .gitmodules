@@ -1,0 +1,3 @@
+[submodule "libmain/fasound/fish-lib-util"]
+	path = libmain/fasound/fish-lib-util
+	url = ssh://git@github.com/misterfish/fish-lib-util
