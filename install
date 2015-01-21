@@ -8,7 +8,7 @@ BEGIN {
     use File::Basename;
     $script_dir = dirname $0;
     push @INC, $script_dir;
-    push @INC, $script_dir . '/../..'; #lib_dir
+    #push @INC, $script_dir . '/../..'; #lib_dir
     $0 = basename $0;
 }
 

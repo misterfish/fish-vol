@@ -6,7 +6,7 @@ use 5.18.0;
 
 my $script_dir;
 my $libmain_dir;
-my $libextra_dir;
+my $libfish_dir;
 
 #my $ITER = 0;
 
@@ -18,11 +18,11 @@ BEGIN {
 
     $script_dir = dirname realpath $0;
     $libmain_dir = $script_dir . '/libmain';
-    $libextra_dir = $script_dir . '/libextra';
+    $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
     #push @INC, $script_dir . '/../lib';
     push @INC, $libmain_dir . '/fish_vol_xs/lib';
 
-    push @INC, $_ for $libmain_dir, $libextra_dir;
+    push @INC, $_ for $libmain_dir, $libfish_dir;
 
     my @blib = qw,
         fish_vol_xs/blib/lib/auto/fish_vol_xs
