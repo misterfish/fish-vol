@@ -47,7 +47,13 @@ my @cmds = (
         qq, cp conf "$install_dir/conf" ,,
     ],
     [
-        [ qq, chd 'libmain/fasound' , ],
+        [ qq, chd 'libmain/fish-lib-asound' , ],
+        sub { $clean ? 'make clean' : '' },
+        'make',
+        [ qq, chd "$pwd" , ],
+    ],
+    [
+        [ qq, chd 'libmain/fish-lib-util/fish-util' , ],
         sub { $clean ? 'make clean' : '' },
         'make',
         [ qq, chd "$pwd" , ],

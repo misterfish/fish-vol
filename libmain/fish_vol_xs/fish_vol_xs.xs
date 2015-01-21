@@ -5,11 +5,11 @@
 
 #include "ppport.h"
 
-/* Not necessary to #include fasound.h.
- * But we want MAX_ constants.
+/* Not necessary to #include fasound.h for compiling --
+ * but, we want MAX_ constants.
  */
 
-#include "../fasound/fasound.h"
+#include "../fish-lib-asound/fish-asound.h"
 
 MODULE = fish_vol_xs		PACKAGE = fish_vol_xs		
 
@@ -36,7 +36,7 @@ xs_init(options)
         RETVAL = newAV();
         sv_2mortal((SV*)RETVAL);
 
-        if (!asound_interface_init(options, card_names_string, card_names_hw, ctl_names, fds)) {
+        if (!fasound_init(options, card_names_string, card_names_hw, ctl_names, fds)) {
             XSRETURN_EMPTY; // Just returning newAV() produces (undef), not empty.
         }
         int i, j, k; // not c99
@@ -97,7 +97,7 @@ xs_set(card_idx, ctl_idx, val_perc)
         int ctl_idx 
         double val_perc
     CODE:
-        RETVAL = asound_interface_set(card_idx, ctl_idx, val_perc);
+        RETVAL = fasound_set(card_idx, ctl_idx, val_perc);
     OUTPUT:
         RETVAL
 
@@ -107,7 +107,7 @@ xs_set_rel(card_idx, ctl_idx, delta_perc)
         int ctl_idx 
         int delta_perc
     CODE:
-        RETVAL = asound_interface_set_rel(card_idx, ctl_idx, delta_perc);
+        RETVAL = fasound_set_rel(card_idx, ctl_idx, delta_perc);
     OUTPUT:
         RETVAL
 
@@ -117,7 +117,7 @@ xs_update(card_idx, ctl_idx)
         int ctl_idx
     CODE:
         bool changed;
-        if (!asound_interface_update(card_idx, ctl_idx, &changed))
+        if (!fasound_update(card_idx, ctl_idx, &changed))
             XSRETURN_UNDEF;
         RETVAL = changed;
     OUTPUT:
@@ -131,7 +131,7 @@ xs_get(card_idx, ctl_idx)
         double val;
         /* man perlcall
          */
-        if (!asound_interface_get(card_idx, ctl_idx, &val)) 
+        if (!fasound_get(card_idx, ctl_idx, &val)) 
             XSRETURN_UNDEF;
         RETVAL = val;
     OUTPUT:
@@ -140,7 +140,7 @@ xs_get(card_idx, ctl_idx)
 bool
 xs_finish()
     CODE:
-        RETVAL = asound_interface_finish();
+        RETVAL = fasound_finish();
     OUTPUT:
         RETVAL
 
@@ -148,6 +148,6 @@ bool
 xs_handle_event(card_num)
         int card_num
     CODE:
-        RETVAL = asound_interface_handle_event(card_num);
+        RETVAL = fasound_handle_event(card_num);
     OUTPUT:
         RETVAL

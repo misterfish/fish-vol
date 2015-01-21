@@ -14,11 +14,11 @@
 
 #include "ppport.h"
 
-/* Not necessary to #include fasound.h.
- * But we want MAX_ constants.
+/* Not necessary to #include fasound.h for compiling --
+ * but, we want MAX_ constants.
  */
 
-#include "../fasound/fasound.h"
+#include "../fish-lib-asound/fish-asound.h"
 
 #line 24 "fish_vol_xs.c"
 #ifndef PERL_UNUSED_VAR
@@ -205,7 +205,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_init)
         RETVAL = newAV();
         sv_2mortal((SV*)RETVAL);
 
-        if (!asound_interface_init(options, card_names_string, card_names_hw, ctl_names, fds)) {
+        if (!fasound_init(options, card_names_string, card_names_hw, ctl_names, fds)) {
             XSRETURN_EMPTY; // Just returning newAV() produces (undef), not empty.
         }
         int i, j, k; // not c99
@@ -280,7 +280,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_set)
 ;
 	bool	RETVAL;
 #line 100 "fish_vol_xs.xs"
-        RETVAL = asound_interface_set(card_idx, ctl_idx, val_perc);
+        RETVAL = fasound_set(card_idx, ctl_idx, val_perc);
 #line 285 "fish_vol_xs.c"
 	ST(0) = boolSV(RETVAL);
     }
@@ -303,7 +303,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_set_rel)
 ;
 	bool	RETVAL;
 #line 110 "fish_vol_xs.xs"
-        RETVAL = asound_interface_set_rel(card_idx, ctl_idx, delta_perc);
+        RETVAL = fasound_set_rel(card_idx, ctl_idx, delta_perc);
 #line 308 "fish_vol_xs.c"
 	ST(0) = boolSV(RETVAL);
     }
@@ -325,7 +325,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_update)
 	bool	RETVAL;
 #line 119 "fish_vol_xs.xs"
         bool changed;
-        if (!asound_interface_update(card_idx, ctl_idx, &changed))
+        if (!fasound_update(card_idx, ctl_idx, &changed))
             XSRETURN_UNDEF;
         RETVAL = changed;
 #line 332 "fish_vol_xs.c"
@@ -352,7 +352,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_get)
         double val;
         /* man perlcall
          */
-        if (!asound_interface_get(card_idx, ctl_idx, &val)) 
+        if (!fasound_get(card_idx, ctl_idx, &val)) 
             XSRETURN_UNDEF;
         RETVAL = val;
 #line 359 "fish_vol_xs.c"
@@ -371,7 +371,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_finish)
     {
 	bool	RETVAL;
 #line 143 "fish_vol_xs.xs"
-        RETVAL = asound_interface_finish();
+        RETVAL = fasound_finish();
 #line 376 "fish_vol_xs.c"
 	ST(0) = boolSV(RETVAL);
     }
@@ -390,7 +390,7 @@ XS_EUPXS(XS_fish_vol_xs_xs_handle_event)
 ;
 	bool	RETVAL;
 #line 151 "fish_vol_xs.xs"
-        RETVAL = asound_interface_handle_event(card_num);
+        RETVAL = fasound_handle_event(card_num);
 #line 395 "fish_vol_xs.c"
 	ST(0) = boolSV(RETVAL);
     }

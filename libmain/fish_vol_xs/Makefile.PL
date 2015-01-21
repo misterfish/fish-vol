@@ -23,7 +23,8 @@ use ExtUtils::MakeMaker;
 
 sub get_objs(_@);
 
-my $FISH_UTIL_DIR = '../fish-util';
+my $FISH_UTIL_DIR = '../fish-lib-util/fish-util';
+
 my $fish_util_objs = get_objs $FISH_UTIL_DIR;
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
@@ -44,7 +45,7 @@ WriteMakefile(
 
         # But, they try to auto-compile fish-util.o for us if fish-util.c
         # changed XX
-        MYEXTLIB    => "$fish_util_objs ../fasound/fasound.o",
+        MYEXTLIB    => "$fish_util_objs ../fish-lib-asound/fish-asound.o",
 );
 
 use constant DEFAULT_DEPS_DIR => '.deps';

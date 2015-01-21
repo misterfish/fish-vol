@@ -115,7 +115,7 @@ my @CONF_REQUIRED = (@CONF_REQUIRED_OSD, qw,
     sock-path 
 ,);
 
-my $FASOUND_H = $libmain_dir . '/fasound/fasound.h';
+my $FASOUND_H = $libmain_dir . '/fish-lib-asound/fish-asound.h';
 my $CONF_FILE_DEFAULT = $ENV{HOME} . '/.local/share/fish-vol/conf';
 
 my $DEFAULT_VOL = 50;
