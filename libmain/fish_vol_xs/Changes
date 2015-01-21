@@ -1,0 +1,6 @@
+Revision history for Perl extension xs_asound.
+
+0.01  Sun Oct 13 14:50:41 2013
+	- original version; created by h2xs 1.23 with options
+		-A -n xs_asound
+

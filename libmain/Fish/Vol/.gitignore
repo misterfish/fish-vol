@@ -1,0 +1,8 @@
+*.so
+*.bs
+*/man*/*
+
+.gr
+
+f_asound/*.o
+f_asound/test

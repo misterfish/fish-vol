@@ -1,0 +1,911 @@
+#!/usr/bin/env perl
+
+package main;
+
+use 5.18.0;
+
+my $script_dir;
+my $libmain_dir;
+my $libextra_dir;
+
+#my $ITER = 0;
+
+BEGIN {
+    my $BIN_NAME = 'fish-vol';
+
+    use File::Basename;
+    use Cwd 'realpath';
+
+    $script_dir = dirname realpath $0;
+    $libmain_dir = $script_dir . '/libmain';
+    $libextra_dir = $script_dir . '/libextra';
+    #push @INC, $script_dir . '/../lib';
+    push @INC, $libmain_dir . '/fish_vol_xs/lib';
+
+    push @INC, $_ for $libmain_dir, $libextra_dir;
+
+    my @blib = qw,
+        fish_vol_xs/blib/lib/auto/fish_vol_xs
+        fish_vol_xs/blib/arch/auto/fish_vol_xs
+    ,;
+
+    push @INC, "$libmain_dir/$_" for @blib;
+
+    $0 = $BIN_NAME;
+}
+
+# Allow being called from outside with -Mconstant=DEBUG,1
+# and if that's not there, compile away DEBUG blocks.
+use if ! defined &DEBUG, 'constant',  DEBUG => 0;
+
+use if DEBUG, 'Fish::Utility_m' => 'd';
+
+# /usr/local/lib/libasound_interface.so
+use fish_vol_xs qw,
+    xs_init xs_get 
+    xs_update
+    xs_set xs_set_rel
+    xs_finish
+    xs_handle_event
+,;
+
+use Glib;
+
+use Carp 'confess', 'cluck';
+use File::Temp;
+
+use Getopt::Long qw, :config
+    bundling no_ignore_case
+,;
+
+use List::Util qw, max min ,;
+#use List::MoreUtils qw, natatime ,;
+
+use Fish::Utility;
+use Fish::Utility_l 'list', 'pushr', 'containsr', 'keysr', 'scalarr', 'slurpn';
+use Fish::Utility_m 'get_file_no', 'D', 'is_even';
+
+use Fish::Socket::Server::unix;
+use Fish::Class 'class', 'o';
+use Fish::Iter 'iter';
+use Fish::Conf qw, c cr ,;
+
+use Fish::Vol::Utility;
+use Fish::Vol::Control;
+use Fish::Vol::Mixer;
+
+# (Maybe) included dynamically later.
+# use Fish::Vol::Osd;
+
+# card idx is the actual idx for the c api.
+class card => [qw, name_hw name_string idx ctls default_vol ctl_by_idx ,]; # ignore XX
+
+class ctl => [qw, name idx ignore ,]; 
+
+sub _info(_@);
+sub _say(_@);
+
+my @FASOUND_CONSTANTS = qw,
+    FASOUND_OPTIONS_QUIET
+,;
+
+my @CONF_REQUIRED_OSD_SCALAR = qw, 
+    radius1 radius2
+    height width
+    spacing-x spacing-y
+    stroke-width 
+    opacity
+    color1 color2
+    transparency-type
+,;
+
+my @CONF_TRIGGER_OSD_REBUILD = qw,
+    color1 color2
+    spacing-x spacing-y
+    transparency-type
+    stroke-width
+,;
+
+my @CONF_REQUIRED_OSD_LIST = qw,
+,;
+
+my @CONF_REQUIRED_OSD = (@CONF_REQUIRED_OSD_SCALAR, @CONF_REQUIRED_OSD_LIST);
+
+my @CONF_REQUIRED = (@CONF_REQUIRED_OSD, qw, 
+    sock-path 
+,);
+
+my $FASOUND_H = $libmain_dir . '/fasound/fasound.h';
+my $CONF_FILE_DEFAULT = $ENV{HOME} . '/.local/share/fish-vol/conf';
+
+my $DEFAULT_VOL = 50;
+
+my $USAGE = "Usage: $0 [-q for quiet] [-c conf_file, defaults to $CONF_FILE_DEFAULT] [-X for no graphics]";
+
+my %opts;
+
+GetOptions(
+    h   => \$opts{h},
+
+    c   => \$opts{c},
+    q   => \$opts{q},
+
+    X   => \$opts{X},
+) or error $USAGE;
+
+error "Run as user.\n" if `whoami` eq "root"; 
+
+info($USAGE), exit if $opts{h};
+
+Fish::Utility_a->verbose_cmds(0);
+
+if (DEBUG) {
+    $SIG{__DIE__} = \&confess;
+    $SIG{__WARN__} = \&cluck;
+}
+
+my $g = o(
+    conf => undef,
+    conf_file => $opts{c} // $CONF_FILE_DEFAULT,
+
+    srcs => [],
+
+    cards => [],
+    cards_by_idx => {},
+
+    do_osd => 0,
+
+    osd_initted => 0,
+    sock => undef, 
+
+    osd => {}, # [$card_idx][$ctl_idx]
+    cur => {}, # [$card_idx][$ctl_idx]
+
+    fd_poll_ids => {},
+
+    proc_state => '', # to keep track of the /proc/asound dir.
+    devices_settling => 0,
+
+    #xs_init_opt => 0,
+
+    cmds => undef,
+    c => o(
+        mixer => 'Fish::Vol::Mixer',
+    ),
+    fasound => o( #constants
+        quiet => undef,
+    ),
+
+    show_all_on_change => undef,
+
+    quiet => undef,
+
+    ignore_regex => [],
+
+);
+
+$g->conf(init_conf());
+$g->quiet($opts{q} // $g->conf->cb('quiet') // 0);
+$g->conf->quiet($g->quiet);
+my $sock_path = $g->conf->cr('sock-path');
+$g->sock(
+    Fish::Socket::Server::unix->new($sock_path),
+);
+
+if (not $opts{X}) {
+    $g->do_osd(1);
+    eval "use Fish::Vol::Osd; 1" or 
+        die $@;
+}
+
+$g->cmds( Fish::Vol::Control->new(
+    conf => $g->conf,
+));
+
+sys sprintf qq, chmod a+w "%s" ,, $sock_path;
+
+#$g->pac(slurpn '10k', $g->conf->cr('proc-file'));
+
+# - - -
+
+init_asound_constants() or 
+    ierror;
+
+init_xs() or 
+    ierror;
+
+init_srcs() or 
+    ierror;
+
+my $loop = Glib::MainLoop->new;
+
+my $card_idx = -1;
+for my $card (list $g->cards) {
+    $g->cur->{++$card_idx} = {};
+}
+
+update({update_osd => 0});
+
+# no op unless do_osd is set.
+init_osd();
+
+set_default_vols();
+
+my $fileno = get_file_no($g->sock->listener) or 
+    confess "Can't get fileno for socket.";
+
+Glib::IO->add_watch($fileno, 'in', sub {
+    # Blocking, but we know there's something waiting.
+    my $s = $g->sock->listen;
+    chomp $s;
+
+    return 1 unless defined $s; # can happen. don't talk back to the socket.
+
+    my @s = split /[\s,]+/, $s;
+    my $_c = shift @s or iwar("Unrecognised input:", $s),
+        $g->sock->say('err'), return 1;
+
+    # Don't warn. Could be invalid value entered by user, for example, and
+    # warning has already been printed.
+    $g->cmds->cmd($_c, @s) or 
+        $g->sock->say('err'), return 1;
+
+    $g->sock->say('ok'), return 1;
+    1
+});
+
+Glib::Timeout->add(1000, sub {
+    $g->conf->update_config;
+    1
+});
+
+my $update_devices;
+$update_devices = sub {
+    my $proc_state = slurpn '10k', $g->conf->cr('proc-file');
+
+    return 1 if $g->devices_settling;
+    #strip_s $proc_state;
+    # file being written.
+    # catch partial file too (lsof) XX
+    #if (not $proc_state) { 
+    #    timeout 100, sub {
+    #        $update_devices->();
+    #
+    #        0
+    #    };
+    #    return 1;
+    #}
+
+    return 1 if $proc_state eq $g->proc_state;
+
+    state $first = 1;
+
+    $g->proc_state($proc_state);
+    if ($first) {
+        $first = 0;
+        return 1;
+    }
+
+    # Give devices a chance to settle. Not ideal way to do this. 
+    _info "Card added/removed, waiting for devices to settle.\n";
+
+    $g->devices_settling(1);
+    timeout 1000, sub {
+
+        init_xs() or 
+            ierror;
+        init_srcs() or
+            ierror;
+        update({update_osd => 0});
+        init_osd();
+
+        $g->devices_settling(0);
+
+        0
+    };
+};
+
+Glib::Timeout->add(500, sub { 
+    $update_devices->(); 
+
+    1 
+});
+    
+add_conf_listeners();
+
+# always-on doesn't work right. XX
+# check always-on in conf.
+timeout_always_on() if $g->do_osd;
+
+sub timeout_always_on {
+    my $inner_timeout_started;
+    my $timeout_started;
+    my $kill_inner;
+
+    Glib::Timeout->add(1000, sub {
+        if ($g->conf->cb('always-on')) {
+            $timeout_started = 1;
+            $g->osd->{0}->{0}->show;
+
+            if (!$inner_timeout_started) {
+                Glib::Timeout->add(100, sub {
+                    if ($kill_inner) {
+                        $kill_inner = 0;
+                        return 0;
+                    }
+                    if ($timeout_started) {
+                        my $iter = main_iter();
+                        while (my $i = $iter->()) {
+                            my $card_idx = $i->card_idx;
+                            my $ctl_idx = $i->ctl_idx;
+                            my $o = get_osd($card_idx, $ctl_idx) or iwar,
+                                next;
+                            $o->aosd_update;
+                        }
+                    }
+
+                    1
+                });
+                $inner_timeout_started = 1;
+            }
+
+        }
+        elsif ($timeout_started) {
+            my $iter = main_iter();
+            while (my $i = $iter->()) {
+                my $card_idx = $i->card_idx;
+                my $ctl_idx = $i->ctl_idx;
+                my $o = get_osd($card_idx, $ctl_idx) or iwar,
+                    next;
+                $o->hide;
+            }
+            $timeout_started = 0;
+            $kill_inner = 1;
+            undef $inner_timeout_started;
+        }
+
+        1
+    });
+
+}
+
+_info 'Ready.';
+_say '';
+
+$loop->run;
+
+xs_finish() or 
+    die;
+
+exit;
+
+# - - - -
+
+sub update_ignore_regex {
+    $g->ignore_regex([
+        map { qr/ $_ /xi } list $g->conf->cl('ignore-regex')
+    ]);
+}
+
+# Get low level info from xs.
+sub init_xs {
+    my $init_opt = 0;
+    $g->srcs([]);
+    update_ignore_regex();
+    $init_opt |= $g->fasound->quiet if $g->conf->cb('quiet');
+
+    my @init = xs_init($init_opt) or iwar,
+        return;
+
+    info "We got", d(\@init) if DEBUG;
+    _say '';
+
+    # XS wraps AV in an extra array.
+    $g->srcs($init[0]);
+
+    1
+}
+
+# Populate our structures like $g->cards.
+# Also add fd polls.
+sub init_srcs {
+    $g->cards([]);
+    $g->cards_by_idx({});
+    #update_ignore_regex();
+    clear_polls();
+    for my $src (list $g->srcs) {
+        my ($card_idx, $card_name_hw, $card_name_string, $ctl_names, $fds) = @$src;
+        $card_name_hw or iwar,
+            return;
+        $card_name_string or iwar,
+            return;
+        @$ctl_names or iwar,
+            return;
+        @$fds or iwar,
+            return;
+        my @ctls;
+        my %ctl_by_idx;
+
+        my $card = card->new(name_hw => $card_name_hw, name_string => $card_name_string, idx => $card_idx, ctls => \@ctls, fds => @$fds, ctl_by_idx => \%ctl_by_idx);
+
+        add_poll($card_idx, @$fds);
+
+        my $i = -1;
+        for my $c (@$ctl_names) {
+            $i++;
+            my $ignore = ignore_ctl_name($c);
+            _info('Ignoring control', BR $c) if $ignore; 
+            my $ctl = ctl->new(name => $c, idx => $i, ignore => $ignore);
+            push @ctls, $ctl;
+            $ctl_by_idx{$i} = 1; # happens to be identical to position in array
+        }
+        pushr $g->cards, $card;
+        $g->cards_by_idx->{$card_idx} = $card;
+    }
+
+    info 'Cards', d($g->cards) if DEBUG;
+
+    1;
+}
+
+sub main_iter {
+    shift if $_[0] eq __PACKAGE__;
+
+    my ($opts) = @_;
+    $opts //= {};
+    my $check_ignore_ctl = $opts->{check_ignore_ctl} // 1;
+
+    my $card_num = 0; # the num in our array
+    my $card_idx; # the c api idx
+    my $ctl_num = 0; # ditto
+    my $ctl_idx; # ditto
+    my $card = $g->cards->[0] // 
+        die;
+
+    my $iter_sub;
+    $iter_sub = sub {
+        my $ctl = $card->ctls->[$ctl_num];
+        if (not $ctl) {
+            $card_num++;
+            $ctl_num = 0;
+            $card = $g->cards->[$card_num] // 
+                return;
+            $ctl = $card->ctls->[0];
+
+        }
+
+        my $card_idx = $card->idx // die;
+        my $ctl_idx = $ctl->idx // die;
+
+        info 'Iter', 'card', $card_idx, 'ctl', $ctl_idx if DEBUG;
+
+        $ctl_num++;
+
+        if ($check_ignore_ctl) {
+            my $ignore_ctl = $ctl->ignore;
+            return $iter_sub->() if $ignore_ctl;
+        }
+
+        my $i = o(
+            card_idx => $card_idx,
+            ctl_idx => $ctl_idx,
+        );
+
+        $i
+    };
+
+    $iter_sub
+}
+
+# Get cur vals from system and update osd state.
+
+sub update {
+    #DEBUG and D "Polling.";
+
+    my ($opt) = @_;
+    $opt //= {};
+    my $update_osd = $opt->{update_osd} // 1;
+
+    my $iter = main_iter();
+    my @osd_update_and_show;
+    my $one_changed;
+    while (my $i = $iter->()) {
+        my $card_idx = $i->card_idx;
+        my $ctl_idx = $i->ctl_idx;
+
+        my $mixerc = $g->c->mixer;
+        my $changed = $mixerc->update($card_idx, $ctl_idx);
+
+        my $cur = $mixerc->get($card_idx, $ctl_idx);
+
+        defined $cur or iwar,
+            return;
+        $g->cur->{$card_idx}->{$ctl_idx} = $cur;
+
+        $one_changed = 1 if $changed;
+
+        if (not $g->conf->cb('show-all-on-change')) {
+            next unless $changed;
+        }
+
+        next unless $g->do_osd and $update_osd and $g->osd_initted;
+
+        if (my $osd = get_osd($card_idx, $ctl_idx)) {
+
+            my $osd_update_and_show = sub {
+                $osd->set($cur)
+            };
+
+            #if ($no_show_osd) {
+            #    $osd->actual($cur);
+            #}
+            #else {
+                push @osd_update_and_show, $osd_update_and_show;
+                #}
+        }
+        else {
+            iwar "Couldn't get osd for card", $card_idx, "ctl", $ctl_idx;
+        }
+    }
+    # show all if one changed
+    if ($g->do_osd and $one_changed) {
+        $_->() for @osd_update_and_show;
+    }
+}
+
+sub get_osd {
+    shift if $_[0] eq __PACKAGE__;
+    my ($card_idx, $ctl_idx) = @_;
+    defined $card_idx or iwar,
+        return;
+    defined $ctl_idx or iwar,
+        return;
+
+    my $a = $g->osd->{$card_idx};
+    defined $a or iwar,
+        return;
+    my $b = $a->{$ctl_idx};
+    defined $b or iwar,
+        return;
+
+    $b
+}
+
+sub cur {
+    shift if $_[0] eq __PACKAGE__;
+    my ($card_idx, $ctl_idx) = @_;
+    defined $card_idx or iwar,
+        return;
+    defined $ctl_idx or iwar,
+        return;
+
+    my $a = $g->cur->{$card_idx};
+    defined $a or iwar,
+        return;
+    my $b = $a->{$ctl_idx};
+    defined $b or iwar,
+        return;
+
+    $b
+}
+
+sub ignore_ctl_name {
+    my ($c) = @_;
+
+    if (my $ig = $g->ignore_regex) {
+        $c =~ m, $_ ,x and 
+            return 1 for @$ig;
+    }
+    
+    0
+}
+
+sub add_poll {
+    my ($card_idx, @fds) = @_;
+
+    for my $fd (@fds) {
+        my $watch_id = Glib::IO->add_watch($fd, 'in', sub {
+            xs_handle_event($card_idx) or 
+                iwar;
+
+            update();
+
+            1
+        });
+
+        $g->fd_poll_ids->{$watch_id} = 1;
+    }
+}
+
+sub clear_polls {
+    for my $id (keysr $g->fd_poll_ids) {
+        Glib::Source->remove($id) or 
+            iwar "Couldn't remove poll with id", BR $id;
+        delete $g->fd_poll_ids->{$id};
+    }
+}
+
+sub init_asound_constants {
+    my $f = $FASOUND_H;
+    my $fh = safeopen $f, { die => 0 } or iwar,
+        return;
+    my %need = map { $_ => 1 } @FASOUND_CONSTANTS;
+    while (<$fh>) {
+        strip_s;
+        next unless m, ^ \# define \s+ (?<k> FASOUND_ \S+) \s+ (?<v> \S+) ,x;
+
+        my $k = $+{k};
+        my $v = $+{v};
+        $v = hex $v if $v =~ / ^ 0x\d+ $ /x;
+        info sprintf 'Setting asound constant %s=%s', $k, $v if DEBUG;
+        delete $need{$k};
+        my $easy = lc $k =~ s/FASOUND_OPTIONS_//r;
+        $g->fasound->$easy($v);
+    }
+
+    if (%need) {
+        iwar "Missing fasound constants:", join ', ', map { BR } keys %need;
+        return 0;
+    }
+
+    1
+}
+
+sub _info(_@) {
+    return if $g->quiet;
+
+    &info; # passes context and @_ doesn't get squished by prototype.
+}
+
+sub _say(_@) {
+    return if $g->quiet;
+
+    say(@_)
+}
+
+sub is_plus_minus_num {
+    state $qr = qr, ^ (\+ | - | \+-)? \d+ $ ,x;
+    my ($s) = @_;
+
+    $s =~ $qr
+}
+
+sub init_conf {
+    my $c = Fish::Conf->new(
+        default_block => 'vol',
+        required => [@CONF_REQUIRED],
+        conf_files => [$g->conf_file],
+    );
+
+    $c
+}
+
+sub clear_osd {
+    $g->osd({});
+}
+
+sub init_osd {
+    return unless $g->do_osd;
+
+    # Not the idx of the c api.
+    my $card_num = -1;
+    my $row = -1;
+
+    for my $card (list $g->cards) {
+        $card_num++;
+        $row++;
+        my %osd;
+        my $card_name = $card->name_hw // die;
+        my $ctls = $card->ctls // die;
+        my $card_idx = $card->idx // die;
+        $g->osd->{$card_idx} = \%osd;
+        my $ctl_num = -1; # not for c api
+        my $col = -1;
+        for my $ctl (@$ctls) {
+            $ctl_num++;
+            my $ctl_idx = $ctl->idx // die; 
+            my $ignore_ctl = $ctl->ignore;
+            my @conf;
+            push @conf, map { 
+                $g->conf->e2i($_) => $g->conf->cr->$_
+            } @CONF_REQUIRED_OSD_SCALAR;
+            push @conf, map { 
+                $g->conf->e2i($_) => $g->conf->cr_list->$_
+            } @CONF_REQUIRED_OSD_LIST;
+
+            my $osd = Fish::Vol::Osd->new(
+                card_name => $card_name,
+
+                @conf
+            );
+
+            $osd{$ctl_idx} = $osd;
+
+            next if $ignore_ctl;
+
+            $col++;
+            $osd->row($row);
+            $osd->col($col);
+            $osd->build;
+
+            $osd->actual(cur($card_idx, $ctl_idx));
+
+            for my $prop (@CONF_REQUIRED_OSD) {
+                my $rebuild_osd = containsr 
+                    \@CONF_TRIGGER_OSD_REBUILD,
+                    $prop;
+                $g->conf->add_listener('changed', 
+                    { 
+                        property => $prop, 
+                        required => 1,
+                    },
+                sub {
+                    my ($val, $osd) = @_;
+                    $g->conf->e2i_s($prop);
+                    $osd->$prop($val);
+                    $osd->build if $rebuild_osd;
+                },
+                $osd #userdata
+            );
+            }
+        }
+    }
+
+    $g->osd_initted(1);
+} 
+
+sub add_conf_listeners {
+    $g->conf->add_listener('changed',
+        {
+            property => 'ignore-regex',
+        },
+        sub {
+            my ($val) = @_;
+            init_xs() or
+                ierror;
+            init_srcs() or 
+                ierror;
+            clear_osd();
+            update({update_osd => 0});
+            init_osd();
+        }
+    );
+
+    $g->conf->add_listener('changed',
+        {
+            property => 'default-vol',
+        },
+        sub {
+            set_default_vols();
+        }
+    );
+}
+
+sub set_default_vols {
+    my @dv = list $g->conf->cl('default-vol');
+    my %defaults;
+    for (@dv) {
+        my @s = split m, \s+ ,x;
+        if (not is_even @s) {
+            if (@dv == 1) {
+                # ok, single value given, match all ids
+                my $val = $s[0] or war("Invalid value for default-vol"), 
+                    return;
+                $defaults{all} = $val;
+            }
+            else {
+                war "Invalid value for default-vol";
+            }
+        }
+        else {
+            my ($id, $val) = @s;
+            $defaults{$id} = $val;
+        }
+    }
+
+    my $card_idx = -1;
+    my %num_matched;
+    for my $card (list $g->cards) {
+        $card_idx++;
+        my $card_name_string = $card->name_string or iwar,
+            return;
+        my $card_name_hw = $card->name_hw or iwar,
+            return;
+
+        while (my $i = iter %defaults) {
+            my $id = $i->k;
+            my $val = $i->v;
+
+            my $regex = $id eq 'all' ? '.' : $id;
+            if (
+                $card_name_string =~ m, $regex ,xi, or
+                $card_name_hw =~ m, $regex ,xi, 
+            ) {
+                $card->default_vol($val);
+                if ( $id ne 'all' and $num_matched{$id}++ ) {
+                    war 'Multiple cards matched for identifer', BR $id, 'in key', BR 'default-vol';
+                }
+            }
+        }
+        $card->default_vol($DEFAULT_VOL) unless defined $card->default_vol;
+
+        info 'set default val for card', Y $card_idx, 'to', G $card->default_vol if DEBUG;
+    }
+}
+
+sub get_default_vol {
+    my ($idx) = @_;
+    my $card = get_card_by_idx($idx) or iwar,
+        return;
+
+    my $dv = $card->default_vol or iwar,
+        return;
+
+    $dv
+}
+
+sub get_card_by_idx {
+    my ($idx) = @_;
+    my $card = $g->cards_by_idx->{$idx} or
+        return;
+
+    $card
+}
+
+sub get_ctl_by_idx {
+    my ($card_idx, $ctl_idx) = @_;
+    my $card = get_card_by_idx($card_idx) or 
+        return;
+    my $ctl = $card->ctl_by_idx->{$ctl_idx} or
+        return;
+
+    $ctl
+}
+
+sub get_cards_by_string {
+    my ($cs) = @_;
+    my @cards;
+    my $iter = main_iter();
+    my $s = $cs eq 'all' ? '.' : $cs;
+    my $qr = qr, $s ,xi;
+    while (my $i = $iter->()) {
+        my $card_idx = $i->card_idx;
+        #my $ctl_idx = $i->ctl_idx;
+        my $card = get_card_by_idx($card_idx) or 
+            ierror;
+        my $card_name_string = $card->name_string or iwar,
+            next;
+        my $card_name_hw = $card->name_hw or iwar,
+            next;
+        if (
+            $card_name_string =~ $qr or 
+            $card_name_hw =~ $qr
+        ) {
+            push @cards, $card;
+        }
+    }
+
+    @cards
+}
+
+sub get_ctls_for_card {
+    my ($card_idx) = @_;
+    my @ctls;
+    my $card = get_card_by_idx($card_idx) or iwar,
+        return ();
+
+    my $ctls = $card->ctls;
+
+    grep { not $_->ignore } @$ctls
+}
+
+sub get_ctls_for_card_by_string {
+    my ($card_idx, $ctl_s) = @_;
+    my @ctls = get_ctls_for_card($card_idx) or iwar,
+        return ();
+
+    my $s = $ctl_s eq 'all' ? '.' : $ctl_s;
+    my $qr = qr, $s ,xi;
+
+    grep { $_->name =~ $qr } @ctls
+}

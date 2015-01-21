@@ -1,0 +1,98 @@
+#!/usr/bin/env perl
+
+use 5.18.0;
+
+our $script_dir;
+
+BEGIN {
+    use File::Basename;
+    $script_dir = dirname $0;
+    push @INC, $script_dir;
+    push @INC, $script_dir . '/../..'; #lib_dir
+    $0 = basename $0;
+}
+
+use Fish::Opt 'opt';
+use Fish::Utility;
+use Fish::Utility_l qw, chd list shiftr scalarr ,;
+Fish::Utility->verbose_cmds(1);
+
+sub do_shell(_);
+sub do_perl(_);
+sub do_it(_);
+
+my $USAGE = "Usage: $0 [-c for make clean]";
+
+my $opt = opt {
+    h   => 'f',
+    c   => 'f',
+} or error $USAGE;
+
+info($USAGE), exit if $opt->h;
+
+error $USAGE if @ARGV;
+
+chd $script_dir;
+
+my $home = $ENV{HOME} or error "Need to set env variable HOME";
+my $install_dir = $home . '/.local/share/fish-vol';
+my $pwd = sys_chomp 'pwd';
+my $clean = $opt->c // 0;
+
+# Within a block, array ref for perl command, string for shell command.
+# Or sub which evaluates to an array ref / string.
+my @cmds = (
+    [
+        qq, mkdir -p "$install_dir" ,,
+        qq, cp conf "$install_dir/conf" ,,
+    ],
+    [
+        [ qq, chd 'libmain/fasound' , ],
+        sub { $clean ? 'make clean' : '' },
+        'make',
+        [ qq, chd "$pwd" , ],
+    ],
+    [
+        [ qq, chd 'libmain/fish_vol_xs' , ],
+        sub { $clean ? 'make clean' : '' },
+        'perl Makefile.PL',
+        'make',
+        [ qq, chd "$pwd" , ],
+    ],
+);
+
+for my $cmd (@cmds) {
+    for my $c (list $cmd) {
+        # can die
+        do_it(ref $c eq 'CODE' ? $c->() : $c);
+    }
+}
+
+exit;
+
+sub do_perl(_) {
+    my ($a) = @_;
+    # perl
+    wartrace if scalarr $a > 1;
+    my $p = shiftr $a;
+    strip_s $p;
+    info $p;
+    eval "$p; 1" or error d8 "Error: $@";
+}
+
+sub do_it(_) {
+    my ($c) = @_;
+    return unless $c;
+    if (ref $c eq 'ARRAY') {
+        do_perl $c;
+    }
+    else {
+        do_shell $c;
+    }
+}
+
+sub do_shell(_) {
+    my ($c) = @_;
+    strip_s $c;
+    sys_system $c;
+}

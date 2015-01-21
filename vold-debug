@@ -1,0 +1,17 @@
+#!/bin/bash
+
+. `dirname "$0"`/functions
+
+USAGE="Usage: $0"
+
+arg="$1"
+
+if [ "$arg" = -h ]; then
+    warn $USAGE
+    exit 0
+else
+    /bin/true
+fi
+
+dir="$(dirname "$0")"
+cmd perl -Mconstant=DEBUG,1 "$dir"/fish-vol "$@"

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+find . lib/ ../../Fish/Conf* ~/.local/share/fish-vol/* | xargs vim
+
+
+reset

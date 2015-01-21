@@ -1,0 +1,62 @@
+[vol]
+
+# overridden by -q
+quiet = false
+
+# visual style XX
+
+# unmute on change XX
+
+sock-path = /home/fritz/.local/share/fish-vol/socket
+
+# - - of each circle
+radius1 = 30
+radius2 = 32
+height = 200
+width = 200
+# -
+
+# flags: xi
+# e.g.: ignore_regex = mic, head, master, beep
+ignore-regex = mic, beep
+
+spacing-x = 90
+spacing-y = 80
+
+stroke-width = 2
+
+# 0 - 1
+opacity = .8
+
+# color1 = all cc9919
+color1 = cc9919
+color2 = 191919
+
+# fake / none / composite (composite is best, cf xcompmgr)
+transparency-type = composite
+
+# when a value is changed, show all controls on the screen, or
+# only the one which changed.
+show-all-on-change = true    
+
+default-fade-in-secs = 3
+default-fade-out-secs = 3
+default-fade-to-secs = 3
+
+# To set all:
+# default-vol = 90
+
+# elephant:
+# default-vol = usb 60, hw:0 97 (97 -> 88 on pi scale)
+
+default-vol = usb 25, hw:0 70
+
+num-fade-steps = 100
+
+# ms
+min-fade-step-time = 50
+
+# not working right.
+always-on = false
+
+proc-file = /proc/asound/cards

@@ -1,0 +1,657 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+BEGIN {
+    use File::Basename;
+    push @INC, dirname $0;
+}
+
+use 5.10.0;
+
+# After switching alsa default, have to wait a few seconds.
+
+use Fish::Vol::Osd;
+
+use Time::HiRes qw/ sleep time/;
+use Getopt::Std;
+
+sub max;
+sub min;
+
+use Fish::Utility_a;
+use Fish::Utility_a qw/ bench_start bench_end bench_pr /;
+
+use File::Temp;
+my $OSD_TIME = 1;
+
+my $Tmp_tmpl = 'volXXXX';
+my $Tmp_dir = '/tmp';
+my $Tmp = File::Temp->new( TEMPLATE => $Tmp_tmpl, DIR => $Tmp_dir, UNLINK => 1 );
+my @Osd_pids;
+
+#%
+
+use Fish::Socket::Server::unix;
+use Proc::SyncExec;
+use utf8;
+
+use constant FADEIN => 1;
+use constant FADEOUT => 2;
+use constant PRINT => 3;
+use constant DEFAULT => 4;
+use constant FACTOR => 5;
+use constant RELATIVE => 6;
+use constant SET => 7;
+use constant HELP => 8;
+use constant STOP => 9;
+use constant FADETO => 10;
+use constant MUTE => 11;
+use constant UNMUTE => 12;
+
+sub error;
+sub war;
+
+use threads;
+use threads::shared;
+
+
+# main event loop
+my $MAIN_SLEEP = .1;
+
+
+# When it's abs, make both master and pcm be that.
+# Also when it's relative. 
+
+my $SOCK_PATH = '/tmp/.myvol-socket';
+
+my $DEFAULT = 95;
+my $NUM_FADE_STEPS = 20;
+my $DEFAULT_FADE_SECS = 3;
+
+# for fade
+my $MIN_SLEEP_PER_STEP = .2;
+
+# for in case someone else sets the vol in the meantime.
+my $POLL_SLEEP = 3;
+
+my $Master_ctl :shared;
+my $Cur_main :shared;
+my $Cur_pcm :shared;
+my $Has_pcm :shared;
+
+my @Cmd_buf :shared;
+my $Cmd_ready :shared;
+my $Cmd_lock :shared;
+
+# cancel fade
+my $Stop :shared = 0;
+
+my $USAGE = "Usage: $0 [-v for verbose]";
+
+our $opt_v;
+our $opt_h;
+getopts('vh');
+if ($opt_h) {
+    error $USAGE;
+}
+my $Verbose :shared = 1 if $opt_v;
+
+$Fish::Utility_a::VERBOSE = $Verbose;
+
+# osd step
+my $SECS = .5;
+
+async { poll_vol() }->detach;
+
+poll_vol_update();
+
+# F::V::Osd objects
+my @Osd;
+push @Osd, osd_init(0, $Cur_main);
+push @Osd, osd_init(1, $Cur_pcm) if $Has_pcm;
+
+$Fish::Utility_a::LOG_LEVEL = 1;
+
+die "Run as user.\n" if `whoami` eq "root\n"; 
+
+sub poll_vol_update {
+
+    my $s = sys 'amixer scontrols';
+    $Master_ctl = 
+        $s =~ /Master/ ? 'Master' :
+        $s =~ /Speaker/ ? 'Speaker' :
+        $s =~ /Headphone/ ? 'Headphone' :
+        (war ('no master'), return);
+
+    $Cur_main = get($Master_ctl) // warn "No cur.";
+    # could be undef
+    $Cur_pcm = get('PCM');
+    $Has_pcm = defined $Cur_pcm;
+}
+
+# sets $Master_ctl, $Cur_main and maybe $Cur_pcm
+sub poll_vol {
+    while (1) {
+        my $ok = poll_vol_update();
+        if (!$ok) {
+            sleep 1;
+        }
+        else {
+            sleep $POLL_SLEEP;
+        }
+    }
+}
+
+my %CMDS = (
+    fadein    => FADEIN,
+    'fade-in'   => FADEIN,
+    'fadeup'    => FADEIN,
+    'fade-up'   => FADEIN,
+    'fin'       => FADEIN,
+
+    fadeout     => FADEOUT,
+    'fade-out'     => FADEOUT,
+    fadedown     => FADEOUT,
+    'fade-down'     => FADEOUT,
+    fo     => FADEOUT,
+
+    fade                => FADETO,
+    fadeto              => FADETO,
+    'fade-to'           => FADETO,
+
+    print       => PRINT,
+
+    default     => DEFAULT,
+    factor      => FACTOR,
+    relative    => RELATIVE,
+    r    => RELATIVE,
+    set         => SET,
+
+    mute        => MUTE,
+    unmute      => UNMUTE,
+
+    help        => HELP,
+
+    stop        => STOP,
+);
+
+my %cmds;
+
+# allow unique abbreviations
+for (keys %CMDS) {
+    my $l = length;
+    for (my $i = $l; $i > 0; $i--) {
+        my $s = substr $_, 0, $i;
+        if (delete $cmds{$s}) {
+            #
+        }
+        else {
+            $cmds{$s} = $CMDS{$_};
+        }
+    }
+}
+
+$cmds{$_} = $CMDS{$_} for keys %CMDS;
+
+my $Sock = Fish::Socket::Server::unix->new($SOCK_PATH);
+sys qq, chmod a+w "$SOCK_PATH" ,;
+
+#warn datadump(\%cmds);
+
+sub get_command {
+    while (1) {
+        if ($Cmd_ready) {
+            $Cmd_lock = 1;
+            my $s = shift @Cmd_buf // die "No cmd in buffer";
+            # empty
+            if (! @Cmd_buf) {
+                $Cmd_lock = 0;
+                $Cmd_ready = 0;
+            }
+            return $s;
+        }
+
+        sleep $MAIN_SLEEP;
+    }
+}
+
+sub get_cmds {
+    my $type = shift;
+    while (1) {
+        if ($Cmd_lock) {
+            #
+        }
+        else {
+            my $s;
+            # both stalling reads
+            if ($type eq 'sock') {
+                $s = $Sock->listen;
+                $Sock->say('');
+            }
+            elsif ($type eq 'stdin') {
+                $s = <STDIN>;
+            }
+            else { die }
+
+            push @Cmd_buf, $s;
+            $Cmd_ready = 1;
+        }
+    }
+}
+
+async { get_cmds('sock') }->detach;
+async { get_cmds('stdin') }->detach;
+
+
+while (my $cmd = get_command()) {
+
+    my @s = split /[\s,]+/, $cmd;
+    my $_c = shift @s or next;
+    my $c = $cmds{$_c};
+    defined $c or war("Unrecognised command:", R $cmd), next;
+
+    my $err;
+
+    if ($c == HELP) {
+        #usage();
+        warn 'help not implemented';
+    }
+    elsif ($c == STOP) {
+        $Stop = 1;
+        osd_stop();
+    }
+    elsif ($c == PRINT) {
+        D 'main', $Cur_main;
+        D 'pcm', $Cur_pcm;
+    }
+    elsif ($c == FADEOUT) {
+        my $secs = shift @s // $DEFAULT_FADE_SECS;
+        is_num $secs or $err = 1;
+        ($secs >= 0) or $err = 1;
+        if ($err) {
+            war("Invalid.");
+            next;
+        }
+        fade(0, $secs);
+    }
+    elsif ($c == FADEIN) {
+        my $secs = shift @s // $DEFAULT_FADE_SECS;
+        my $fade_to = $DEFAULT;
+        D2 'to', $fade_to, 'secs', $secs;
+        is_num $secs or $err = 1;
+        $secs >= 0 or $err = 1;
+
+        # ?
+        $secs = "0$secs" if substr $secs, 0, 1 eq '.';
+
+        if ($err) {
+            war("Invalid.");
+            next;
+        }
+        fade($fade_to, $secs);
+    }
+    elsif ($c == FADETO) {
+        my ($fade_to, $secs) = @s;
+        D $fade_to, $secs;
+        defined $fade_to and defined $secs or war("Invalid"), next;
+        D2 'to', $fade_to, 'secs', $secs;
+        is_num $secs or $err = 1;
+        is_num $fade_to or $err = 1;
+        $secs >= 0 or $err = 1;
+
+        # ?
+        $secs = "0$secs" if substr $secs, 0, 1 eq '.';
+
+        if ($err) {
+            war("Invalid.");
+            next;
+        }
+        fade($fade_to, $secs);
+    }
+    else {
+        my %set = (
+            master => undef,
+            pcm => undef,
+        );
+        my %set_osd = (
+            master => undef,
+            pcm => undef,
+        );
+
+        if ($c == DEFAULT) {
+            $set{master} = "$DEFAULT";
+            $set{pcm} = $set{master};
+        }
+        elsif ($c == FACTOR) {
+            my $f = shift @s;
+            defined $f or war("Invalid"), next;
+            $f =~ /\D/ and $err = 1;
+            $f >= 0 or $err = 1;
+
+            $set{master} = $Cur_main * $f / 100;
+            $Cur_pcm and $set{pcm} = $Cur_pcm * $f / 100 if defined $Cur_pcm;
+        }
+        elsif ($c == RELATIVE) {
+            my $a = shift @s;
+            defined $a or war("Invalid"), next;
+
+            # e.g. -5 => cur - 5 (not cur * .95)
+            # e.g. 5 or +5 => cur + 5 (not cur * 1.05)
+            # +-5 allowed for legacy
+            $a =~ / ^ (\+ | - | \+-)? \d+ $ /x or war("Invalid"), next;
+            $a =~ s/\+//;
+
+            D2 'cur_main', $Cur_main;
+            D2 'a', $a;
+            $set{master} = $Cur_main + $a;
+            $set{pcm} = $Cur_pcm + $a if defined $Cur_pcm;
+        }
+        elsif ($c == SET) {
+            $set{master} = shift @s;
+            defined $set{master} or war("Invalid"), next;
+            $set{pcm} = $set{master} if defined $Cur_pcm;
+        }
+        elsif ($c == MUTE) {
+            $set{master} = 'mute';
+            $set{pcm} = 'mute' if defined $Cur_pcm;
+        }
+        elsif ($c == UNMUTE) {
+            $set{master} = 'unmute';
+            $set{pcm} = 'unmute' if defined $Cur_pcm;
+        }
+        else {
+            war("Invalid");
+            next;
+        }
+
+        defined $set{master} or warn, next;
+
+        my @do = ('master');
+        push @do, 'pcm' if defined $Cur_pcm;
+        my @cur = ($Cur_main, $Cur_pcm);
+
+        for my $which (@do) {
+            my $cur = shift @cur;
+
+            my $s = $set{$which};
+            defined $s or next;
+
+            if ($s eq 'mute') {
+                mute($which);
+                # don't set
+                delete $set{$which};
+                $set_osd{$which} = 0;
+            }
+            elsif ($s eq 'unmute') {
+                unmute($which);
+                # don't set
+                delete $set{$which};
+                $set_osd{$which} = $cur;
+            }
+            else {
+                $s < 0 and $set{$which} = 0;
+                $s > 100 and $set{$which} = 100;
+
+                $set_osd{$which} = $set{$which};
+            }
+        }
+        # ok if args undef, no-op
+        set($set{master}, $set{pcm});
+
+        defined $set_osd{master} or warn;
+
+        osd_ctl(0, $set_osd{master});
+        osd_ctl(1, $set_osd{pcm}) if $set_osd{pcm};
+    }
+}
+
+sub mute {
+    my $which = shift or warn, return;
+    _set($which, 'mute');
+}
+
+sub unmute {
+    my $which = shift or warn, return;
+    _set($which, 'unmute');
+}
+
+sub set { 
+    my ($master, $pcm) = @_;
+
+    _set('master', "$master") if defined $master;
+    _set('pcm', "$pcm") if defined $pcm;
+
+    poll_vol_update();
+}
+
+sub osd_ctl {
+
+    my ($which, $perc, $arg_time) = @_;
+
+    $perc /= 100;
+
+    my $o = $Osd[$which] or do {
+        war 'No osd, which=', $which;
+        return;
+    };
+
+    my $time;
+    if (defined $arg_time) {
+        $o->display_time($arg_time);
+        $o->fading(1);
+    }
+    else {
+        $o->display_time($SECS);
+        $o->fading(0);
+    }
+
+    $o->perc($perc);
+
+    $o->update;
+
+}
+
+sub osd_init {
+    my ($index, $init_perc) = @_;
+    return Fish::Vol::Osd->new(
+        init => $init_perc / 100,
+        index => $index,
+    );
+}
+
+sub osd_stop {
+    $_->stop for @Osd;
+}
+
+# possibilities:
+# amixer set x 5
+# amixer set x 5%
+# but these are both on the exponential scale.
+
+sub _set {
+    my ( $which, $val ) = @_;
+
+    return unless defined $val;
+
+    if ($val eq 'mute') {
+        $val = 'off';
+    }
+    elsif ($val eq 'unmute') {
+        $val = 'on';
+    }
+    else {
+        $val =~ / \d+ /x or warn, return;
+        $val = "$val%";
+    }
+
+    # not so necessary. also unmuting doesn't seem possible using off/on.
+    #my $word = $val eq '0%' ? 'off' : 'on';
+
+    my $a = 
+        $which eq 'master' ? $Master_ctl : 
+        $which eq 'pcm' ? 'PCM' : 
+        (warn, return);
+
+    #D 'setting', $a, $val, $word;
+
+    my $cmd = "amixer set '$a' $val";
+    sys_ok $cmd or warn;
+}
+
+sub get {
+    my $which = shift or warn, return;
+
+    # cache
+    state $v;
+    state $time;
+
+    my $t = time;
+
+#    if (!$time or $t - $time > 1) {
+        $v = sys "amixer", 0;
+        $time = $t;
+#    }
+
+    # Note, assumes equal balance, quick & dirty
+
+    # Simple mixer control 'Speaker',0
+    #  Front Left: Playback 22 [15%] [-24.25dB] [on]
+    #  Front Right: Playback 22 [15%] [-24.25dB] [on]
+    my @s = split /\n/, $v;
+    my $in = 0;
+    for (@s) {
+        if ($in) {
+            if (/Simple mixer/) {
+                #bad
+                last;
+            }
+            if (/ (\d+) % /x) {
+                #good
+                return $1;
+            }
+        }
+        else {
+            /Simple mixer .+$which/ and $in = 1;
+        }
+    }
+    #bad
+    return;
+}
+
+sub fade {
+    my ($fade_to, $secs) = @_;
+    async {
+        D2 'secs', $secs;
+        my $cm = $Cur_main;
+        my $cp = $Cur_pcm;
+
+        my $i = $cm;
+        my $j = $cp // undef;
+        my $num_steps = max($NUM_FADE_STEPS, $secs * 4);
+
+        my $sleep_per_step = $secs / $num_steps;
+        if ($sleep_per_step < $MIN_SLEEP_PER_STEP) {
+            $sleep_per_step = $MIN_SLEEP_PER_STEP;
+            $num_steps = int($secs / $sleep_per_step);
+        }
+
+        my @perc = ($fade_to / 100);
+        $cp and push @perc, $fade_to / 100;
+        osd_ctl(0, $fade_to, $secs);
+        osd_ctl(1, $fade_to, $secs) if $Has_pcm;
+
+        for ( 1 .. $num_steps ) {
+
+            my $t1 = time;
+
+            if ($Stop) {
+                $Stop = 0;
+                last;
+            }
+            $i += ($fade_to - $cm) / $num_steps;
+            $j += ($fade_to - $cp) / $num_steps if defined $j;
+            $i < 1 and $i = 0;
+            $j < 1 and $j = 0 if defined $j;
+
+            set($i, $j);
+
+            my $s = max(0, $sleep_per_step - (time - $t1));
+            D2 'sleep', $s, 'numsteps', $num_steps;
+            sleep $s;
+        }
+
+        }->detach;
+}
+
+# # # UTIL
+
+
+# doesn't check for actual nums
+
+sub max {
+    my ($a, $b) = @_;
+    return $a > $b ? $a : $b;
+}
+
+sub min {
+    my ($a, $b) = @_;
+    return $a < $b ? $a : $b;
+}
+
+=head
+sub normalise {
+    my $perc = shift // die;
+    # boldog: 64
+
+    # setting perc just scales the exponent in the dB scale:
+    # P = 100% means V = x ^ 64
+    # P = 98% means V = x ^ 63
+    # Big jump.
+
+
+    # So, convert:
+    # V = x ^ (64/100 * P)
+    # given perc%, set to V = perc/100 * x ^ 64
+    # perc/100 * x ^ 64 = x ^ (64/100 * P)
+    # P = max(1, (log (perc/100)) + 64) * 100 / 64)
+
+    # 0 -> 0
+    if ($perc == 0) {
+        return 0;
+    }
+
+    my $x = 100 ** (1/64);
+
+    my $a = $perc;
+    $a /= 100;
+    $a = log ($a) / log ($x) ;
+    $a += 64;
+    $a *= 100 / 64;
+
+    $DEBUG and D max(1, $a);
+    return max(1, $a);
+
+}
+=cut
+
+sub error {
+    my @s = @_;
+    die join ' ', @s, "\n";
+}
+
+sub war {
+    my @s = @_;
+    warn join ' ', @s, "\n";
+}
+
+END {
+    if (-d $Tmp) {
+        my $tmpl = $Tmp_tmpl =~ s/X/./gr;
+        $Tmp =~ /$Tmp_dir\/$tmpl/ or next;
+        # blah
+        $Tmp =~ /tmp/ or next;
+        sys qq, rm -rf "$Tmp",;
+    }
+}

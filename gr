@@ -1,0 +1,10 @@
+#!/bin/bash
+
+path=". lib/"
+find $path -iname '*.pm' >.gr
+find $path -iname '*.pl' >>.gr
+find $path -iname 'vold' >>.gr
+find $path -iname '*.xs' >>.gr
+find $path -iname '*.c' >>.gr
+
+while read r; do grep -HiP --color=always "$@" "$r"; done < .gr
