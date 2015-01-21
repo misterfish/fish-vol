@@ -3,16 +3,16 @@
 use 5.18.0;
 
 my $libmain_dir;
-my $libextra_dir;
+my $libfish_dir;
 
 BEGIN {
     use File::Basename;
 
     $libmain_dir = '..';
-    $libextra_dir = '../../libextra';
+    $libfish_dir = '../../libextra/fish-lib-perl';
 
     push @INC, dirname $0;
-    push @INC, $_ for $libextra_dir, $libmain_dir;
+    push @INC, $_ for $libfish_dir, $libmain_dir;
     $0 = basename $0;
 }
 
