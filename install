@@ -3,11 +3,15 @@
 use 5.18.0;
 
 our $script_dir;
+our $libmain_dir;
+our $libfish_dir;
 
 BEGIN {
     use File::Basename;
     $script_dir = dirname $0;
-    push @INC, $script_dir;
+    $libmain_dir = $script_dir . '/libmain';
+    $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
+    push @INC, $_ for $libmain_dir, $libfish_dir;
     #push @INC, $script_dir . '/../..'; #lib_dir
     $0 = basename $0;
 }
