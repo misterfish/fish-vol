@@ -2,9 +2,9 @@
 
 #perl '-V:install.*' for dirs
 #
-#./build
-#./build installconf
-#sudo ./build install
+# ./build
+# ./build installconf [-d=~/.local/share/fish-vol]
+# optional: sudo ./build install [-d=...]
 
 use 5.18.0;
 
@@ -25,26 +25,40 @@ use Fish::Opt 'opt';
 use Fish::Utility;
 use Fish::Utility_l qw, chd list shiftr scalarr ,;
 Fish::Utility->verbose_cmds(1);
+use Fish::Class 'o';
 
-sub natatime($+);
+# like natatime from List::MoreUtils
+sub chunk;
+sub get_default_dir;
 
 my $USAGE = "Usage: $0 [-c for make clean]";
 
 my $opt = opt {
     h   => 'f',
     c   => 'f',
+    d   => 's',
 } or error $USAGE;
 
 info($USAGE), exit if $opt->h;
+
+my $g = o(
+    mode => shift // '',
+    dir => $opt->d // '',
+);
 
 error $USAGE if @ARGV;
 
 chd $script_dir;
 
 my $home = $ENV{HOME} or error "Need to set env variable HOME";
+
+# XX
 my $install_dir = $home . '/.local/share/fish-vol';
+
 my $pwd = sys_chomp 'pwd';
 my $clean = $opt->c // 0;
+
+# - - -
 
 my @cmds = (
     [
@@ -72,24 +86,27 @@ my @cmds = (
     ],
 );
 
-for my $block (@cmds) {
-    my $n = natatime 2, @$block;
-    while (my @v = $n->()) {
-        my ($executor, $what) = @v;
-        $what = $what->() if ref $what eq 'CODE';
-        if ($executor eq 'perl') {
-            do_perl($what);
-        }
-        elsif ($executor eq 'shell') {
-            do_shell($what);
-        }
-        else {
+# - - - -
+
+go(\@cmds);
+
+exit;
+
+sub go {
+    my ($cmds) = @_;
+    for my $block (list $cmds) {
+        my $n = chunk 2, $block;
+        while (my @v = $n->()) {
+            my ($executor, $what) = @v;
+            $what = $what->() if ref $what eq 'CODE';
+            $executor eq 'perl' ?
+                do_perl($what) :
+            $executor eq 'shell' ?
+                do_shell($what) :
             ierror "Invalid:", BR $executor;
         }
     }
 }
-
-exit;
 
 sub do_perl {
     my ($p) = @_;
@@ -106,7 +123,7 @@ sub do_shell {
 }
 
 # assume well-behaved args.
-sub natatime($+) {
+sub chunk {
     my ($n, $ary) = @_;
     my $i = -1;
     my $length = @$ary;
