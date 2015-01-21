@@ -1,5 +1,11 @@
 #!/usr/bin/env perl
 
+#perl '-V:install.*' for dirs
+#
+#./build
+#./build installconf
+#sudo ./build install
+
 use 5.18.0;
 
 our $script_dir;
@@ -12,7 +18,6 @@ BEGIN {
     $libmain_dir = $script_dir . '/libmain';
     $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
     push @INC, $_ for $libmain_dir, $libfish_dir;
-    #push @INC, $script_dir . '/../..'; #lib_dir
     $0 = basename $0;
 }
 
@@ -21,9 +26,7 @@ use Fish::Utility;
 use Fish::Utility_l qw, chd list shiftr scalarr ,;
 Fish::Utility->verbose_cmds(1);
 
-sub do_shell(_);
-sub do_perl(_);
-sub do_it(_);
+sub natatime($+);
 
 my $USAGE = "Usage: $0 [-c for make clean]";
 
@@ -43,66 +46,83 @@ my $install_dir = $home . '/.local/share/fish-vol';
 my $pwd = sys_chomp 'pwd';
 my $clean = $opt->c // 0;
 
-# Within a block, array ref for perl command, string for shell command.
-# Or sub which evaluates to an array ref / string.
 my @cmds = (
     [
-        qq, mkdir -p "$install_dir" ,,
-        qq, cp conf "$install_dir/conf" ,,
+        shell => qq, mkdir -p "$install_dir" ,,
+        shell => qq, cp conf "$install_dir/conf" ,,
     ],
     [
-        [ qq, chd 'libmain/fish-lib-asound' , ],
-        sub { $clean ? 'make clean' : '' },
-        'make',
-        [ qq, chd "$pwd" , ],
+        perl => qq, chd 'libmain/fish-lib-asound' , ,
+        shell => sub { $clean ? 'make clean' : '' },
+        shell => 'make',
+        perl => qq, chd "$pwd" , ,
     ],
     [
-        [ qq, chd 'libmain/fish-lib-util/fish-util' , ],
-        sub { $clean ? 'make clean' : '' },
-        'make',
-        [ qq, chd "$pwd" , ],
+        perl => qq, chd 'libmain/fish-lib-util/fish-util' , ,
+        shell => sub { $clean ? 'make clean' : '' },
+        shell => 'make',
+        perl => qq, chd "$pwd" , ,
     ],
     [
-        [ qq, chd 'libmain/fish_vol_xs' , ],
-        sub { $clean ? 'make clean' : '' },
-        'perl Makefile.PL',
-        'make',
-        [ qq, chd "$pwd" , ],
+        perl => qq, chd 'libmain/fish_vol_xs' , ,
+        shell => sub { $clean ? 'make clean' : '' },
+        shell => 'perl Makefile.PL',
+        shell => 'make',
+        perl => qq, chd "$pwd" ,,
     ],
 );
 
-for my $cmd (@cmds) {
-    for my $c (list $cmd) {
-        # can die
-        do_it(ref $c eq 'CODE' ? $c->() : $c);
+for my $block (@cmds) {
+    my $n = natatime 2, @$block;
+    while (my @v = $n->()) {
+        my ($executor, $what) = @v;
+        $what = $what->() if ref $what eq 'CODE';
+        if ($executor eq 'perl') {
+            do_perl($what);
+        }
+        elsif ($executor eq 'shell') {
+            do_shell($what);
+        }
+        else {
+            ierror "Invalid:", BR $executor;
+        }
     }
 }
 
 exit;
 
-sub do_perl(_) {
-    my ($a) = @_;
+sub do_perl {
+    my ($p) = @_;
     # perl
-    wartrace if scalarr $a > 1;
-    my $p = shiftr $a;
-    strip_s $p;
+    return unless strip_s $p;
     info $p;
     eval "$p; 1" or error d8 "Error: $@";
 }
 
-sub do_it(_) {
+sub do_shell {
     my ($c) = @_;
-    return unless $c;
-    if (ref $c eq 'ARRAY') {
-        do_perl $c;
-    }
-    else {
-        do_shell $c;
-    }
+    return unless strip_s $c;
+    sys_system $c;
 }
 
-sub do_shell(_) {
-    my ($c) = @_;
-    strip_s $c;
-    sys_system $c;
+# assume well-behaved args.
+sub natatime($+) {
+    my ($n, $ary) = @_;
+    my $i = -1;
+    my $length = @$ary;
+    sub {
+        my @ret;
+        for my $j (1 .. $n) {
+            $i++;
+            if ($i == $length - 1) {
+                iwar 'j', $j, 'n', $n unless $j == $n;  #premature end
+            }
+            if ($i == $length) {
+                return; #done
+            }
+            push @ret, $ary->[$i];
+        }
+
+        @ret
+    }
 }

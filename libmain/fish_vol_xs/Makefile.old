@@ -18,7 +18,7 @@
 #     DEFINE => q[]
 #     INC => q[-I.]
 #     LIBS => [q[-lasound]]
-#     MYEXTLIB => q[../fish-util//fish-util.o ../fasound/fasound.o]
+#     MYEXTLIB => q[../fish-lib-util/fish-util//fish-util.o ../fish-lib-asound/fish-asound.o]
 #     NAME => q[fish_vol_xs]
 #     PREREQ_PM => {  }
 #     TEST_REQUIRES => {  }
@@ -121,7 +121,7 @@ DESTINSTALLVENDORMAN3DIR = $(DESTDIR)$(INSTALLVENDORMAN3DIR)
 PERL_LIB = /usr/share/perl/5.20
 PERL_ARCHLIB = /usr/lib/i386-linux-gnu/perl/5.20
 LIBPERL_A = libperl.a
-MYEXTLIB = ../fish-util//fish-util.o ../fasound/fasound.o
+MYEXTLIB = ../fish-lib-util/fish-util//fish-util.o ../fish-lib-asound/fish-asound.o
 FIRST_MAKEFILE = Makefile
 MAKEFILE_OLD = Makefile.old
 MAKE_APERL_FILE = Makefile.aperl
@@ -572,8 +572,8 @@ realclean_subdirs :
 # Delete temporary files (via clean) and also delete dist files
 realclean purge ::  clean realclean_subdirs
 	- $(RM_F) \
-	  $(MAKEFILE_OLD) $(FIRST_MAKEFILE) \
-	  $(OBJECT) 
+	  $(MAKEFILE_OLD) $(OBJECT) \
+	  $(FIRST_MAKEFILE) 
 	- $(RM_RF) \
 	  $(DISTVNAME) 
 
