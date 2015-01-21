@@ -9,5 +9,6 @@ git submodule init
 cd ../..
 git submodule update --remote --recursive
 
-# To keep submodules up to date:
+# To keep updated:
+git pull
 git submodule update --remote --recursive
