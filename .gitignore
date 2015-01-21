@@ -1,3 +1,5 @@
 .gr
 *.swo
 *.swp
+
+libmain/fish-lib-asound
