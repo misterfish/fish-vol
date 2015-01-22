@@ -62,10 +62,10 @@ my $g = o(
         ),
         install => o(),
     ),
-    config => o(
-        installsitelib => undef,
-        installsitearch => undef,
-        installsitebin => undef,
+    install => o(
+        lib => undef,
+        arch => undef,
+        bin => undef,
     ),
 );
 
@@ -133,17 +133,19 @@ $cmds->installconf([
 
 $cmds->install([
     perl    => sub { install(); 0 }, # sets $g->config vars
-    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/lib/fish_vol_xs.pm' %s ,, shell_quote $g->config->installsitelib },
-    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/blib/arch/auto/fish_vol_xs/fish_vol_xs.so' %s ,, shell_quote $g->config->installsitearch },
-    shell   => sub { mkdir qq, %s/Fish ,, shell_quote $g->config->installsitelib },
-    shell   => sub { sprintf qq, cp -ar 'libmain/Fish/Vol' %s/Fish ,, shell_quote $g->config->installsitelib },
-    shell    => sub { sprintf qq, cp -ar 'libextra/fish-lib-perl/Fish/'* %s/Fish ,, shell_quote $g->config->installsitelib },
-    shell    => sub { sprintf qq, cp -ar fish-vol %s ,, shell_quote $g->config->installsitebin },
+    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/lib/fish_vol_xs.pm' %s ,, shell_quote $g->install->lib },
+    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/blib/arch/auto/fish_vol_xs/fish_vol_xs.so' %s ,, shell_quote $g->install->arch },
+    shell   => sub { mkdir qq, %s/Fish ,, shell_quote $g->install->lib },
+    shell   => sub { sprintf qq, cp -ar 'libmain/Fish/Vol' %s/Fish ,, shell_quote $g->install->lib },
+    shell    => sub { sprintf qq, cp -ar 'libextra/fish-lib-perl/Fish/'* %s/Fish ,, shell_quote $g->install->lib },
+    shell    => sub { sprintf qq, cp -ar fish-vol %s ,, shell_quote $g->install->bin },
 ]);
 
 # - - - -
 
-my $mode = $g->mode;
+my $mode = $g->mode or 
+    error $USAGE;
+
 contains @MODES, $mode or 
     error "Invalid mode:", BR $mode;
 
@@ -230,9 +232,9 @@ sub install {
     info Y 'installsitearch', $installsitearch;
     info Y 'installsitelib', $installsitelib;
     info Y 'installsitebin', $installsitebin;
-    $g->config->installsitebin($installsitebin);
-    $g->config->installsitearch($installsitearch);
-    $g->config->installsitelib($installsitelib);
+    $g->install->bin($installsitebin);
+    $g->install->arch($installsitearch);
+    $g->install->lib($installsitelib);
 }
 
 sub generate_fasound_constants {
