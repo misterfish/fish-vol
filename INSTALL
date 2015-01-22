@@ -1,0 +1,18 @@
+# After cloning:
+git submodule init
+git submodule update --remote --recursive
+
+Then:
+
+./this -h 
+ To see options.
+
+Quick start:
+
+./this init
+./this build -c
+./this installconf 
+ By default, the conf file is installed in ~/.local/share/fish-vol
+./this install [-p prefix]
+ Will probably need sudo, or -p.
+
