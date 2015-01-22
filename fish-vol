@@ -59,7 +59,6 @@ use Getopt::Long qw, :config
 ,;
 
 use List::Util qw, max min ,;
-#use List::MoreUtils qw, natatime ,;
 
 use Fish::Utility;
 use Fish::Utility_l 'list', 'pushr', 'containsr', 'keysr', 'scalarr', 'slurpn';
@@ -73,6 +72,7 @@ use Fish::Conf qw, c cr ,;
 use Fish::Vol::Utility;
 use Fish::Vol::Control;
 use Fish::Vol::Mixer;
+use Fish::Vol::ConstantsFasound;
 
 # (Maybe) included dynamically later.
 # use Fish::Vol::Osd;
@@ -84,10 +84,6 @@ class ctl => [qw, name idx ignore ,];
 
 sub _info(_@);
 sub _say(_@);
-
-my @FASOUND_CONSTANTS = qw,
-    FASOUND_OPTIONS_QUIET
-,;
 
 my @CONF_REQUIRED_OSD_SCALAR = qw, 
     radius1 radius2
@@ -115,7 +111,6 @@ my @CONF_REQUIRED = (@CONF_REQUIRED_OSD, qw,
     sock-path 
 ,);
 
-my $FASOUND_H = $libmain_dir . '/fish-lib-asound/fish-asound.h';
 my $CONF_FILE_DEFAULT = $ENV{HOME} . '/.local/share/fish-vol/conf';
 
 my $DEFAULT_VOL = 50;
@@ -172,9 +167,10 @@ my $g = o(
     c => o(
         mixer => 'Fish::Vol::Mixer',
     ),
-    fasound => o( #constants
-        quiet => undef,
-    ),
+
+    #fasound => o( #constants
+    #    quiet => undef,
+    #),
 
     show_all_on_change => undef,
 
@@ -185,6 +181,7 @@ my $g = o(
 );
 
 $g->conf(init_conf());
+# add listener XX
 $g->quiet($opts{q} // $g->conf->cb('quiet') // 0);
 $g->conf->quiet($g->quiet);
 my $sock_path = $g->conf->cr('sock-path');
@@ -207,9 +204,6 @@ sys sprintf qq, chmod a+w "%s" ,, $sock_path;
 #$g->pac(slurpn '10k', $g->conf->cr('proc-file'));
 
 # - - -
-
-init_asound_constants() or 
-    ierror;
 
 init_xs() or 
     ierror;
@@ -392,7 +386,12 @@ sub init_xs {
     my $init_opt = 0;
     $g->srcs([]);
     update_ignore_regex();
-    $init_opt |= $g->fasound->quiet if $g->conf->cb('quiet');
+
+    my $quiet_const = $Fish::Vol::ConstantsFasound::constants{quiet} //
+        iwar "Missing constant", BR 'quiet';
+
+    #$init_opt |= $g->fasound->quiet if $g->conf->cb('quiet');
+    $init_opt |= $quiet_const if $g->quiet;
 
     my @init = xs_init($init_opt) or iwar,
         return;
@@ -623,32 +622,6 @@ sub clear_polls {
             iwar "Couldn't remove poll with id", BR $id;
         delete $g->fd_poll_ids->{$id};
     }
-}
-
-sub init_asound_constants {
-    my $f = $FASOUND_H;
-    my $fh = safeopen $f, { die => 0 } or iwar,
-        return;
-    my %need = map { $_ => 1 } @FASOUND_CONSTANTS;
-    while (<$fh>) {
-        strip_s;
-        next unless m, ^ \# define \s+ (?<k> FASOUND_ \S+) \s+ (?<v> \S+) ,x;
-
-        my $k = $+{k};
-        my $v = $+{v};
-        $v = hex $v if $v =~ / ^ 0x\d+ $ /x;
-        info sprintf 'Setting asound constant %s=%s', $k, $v if DEBUG;
-        delete $need{$k};
-        my $easy = lc $k =~ s/FASOUND_OPTIONS_//r;
-        $g->fasound->$easy($v);
-    }
-
-    if (%need) {
-        iwar "Missing fasound constants:", join ', ', map { BR } keys %need;
-        return 0;
-    }
-
-    1
 }
 
 sub _info(_@) {

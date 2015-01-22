@@ -1,0 +1,273 @@
+#!/usr/bin/env perl
+
+#perl '-V:install.*' for dirs
+#
+# ./build
+# ./build installconf [-d=~/.local/share/fish-vol]
+# optional: sudo ./build install [-d=...]
+
+use 5.18.0;
+
+our $script_dir;
+our $libmain_dir;
+our $libfish_dir;
+
+BEGIN {
+    use File::Basename;
+    $script_dir = dirname $0;
+    $libmain_dir = $script_dir . '/libmain';
+    $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
+    push @INC, $_ for $libmain_dir, $libfish_dir;
+    $0 = basename $0;
+}
+
+use utf8;
+
+use Fish::Opt 'opt';
+use Fish::Utility;
+use Fish::Utility_l qw, chd list contains,;
+Fish::Utility->verbose_cmds(1);
+use Fish::Class 'o';
+
+# like natatime from List::MoreUtils
+sub chunk;
+sub get_default_dir;
+
+my $DEFAULT_CONF_DIR = $ENV{HOME} . '/.local/share/fish-vol';
+my $FASOUND_H = $libmain_dir . '/fish-lib-asound/fish-asound.h';
+my @FASOUND_CONSTANTS = qw,
+    FASOUND_OPTIONS_QUIET
+,;
+
+my $USAGE = get_usage();
+
+my $opt = opt {
+    h   => 'f',
+    c   => 'f',
+    d   => 's',
+} or error $USAGE;
+
+info($USAGE), exit if $opt->h;
+
+my $g = o(
+    mode => shift // '',
+    modes => o(
+        init => o(),
+        build => o(
+            clean => $opt->c // 0,
+        ),
+        gitpull => o(),
+        installconf => o(
+            dir => $opt->d // $DEFAULT_CONF_DIR,
+        ),
+        install => o(),
+    ),
+    config => o(
+        installsitelib => undef,
+        installsitearch => undef,
+        installsitebin => undef,
+    ),
+);
+
+error $USAGE if @ARGV;
+
+my @MODES = qw,
+    init build gitpull
+    installconf install
+,;
+
+my $home = $ENV{HOME} or error "Need to set env variable HOME";
+my $pwd = sys_chomp 'pwd';
+
+chd $script_dir;
+
+my $cmds = o(
+    init => [],
+    build => [],
+    gitpull => [],
+    installconf => [],
+    install => [],
+);
+
+# - - -
+
+$cmds->init([
+    shell   => 'git submodule init',
+    shell   => 'git submodule update --remote --recursive',
+    perl    => qq, chd 'libmain/fish-lib-asound' ,,
+    shell   => 'git submodule init',
+    perl    => qq, chd '../..',,
+    shell   => 'git submodule update --remote --recursive',
+]);
+
+$cmds->build([
+    perl => qq, chd 'libmain/fish-lib-asound' , ,
+    shell => sub { $g->modes->build->clean ? 'make clean' : '' },
+    shell => 'make',
+    perl => qq, chd "$pwd" , ,
+
+    perl => qq, chd 'libmain/fish-lib-util/fish-util' , ,
+    shell => sub { $g->modes->build->clean ? 'make clean' : '' },
+    shell => 'make',
+    perl => qq, chd "$pwd" , ,
+
+    perl => qq, chd 'libmain/fish_vol_xs' , ,
+    shell => sub { $g->modes->build->clean ? 'make clean' : '' },
+    shell => 'perl Makefile.PL',
+    shell => 'make',
+    perl => qq, chd "$pwd" ,,
+
+    perl => sub { generate_fasound_constants(\@FASOUND_CONSTANTS, $FASOUND_H, "Fish::Vol::ConstantsFasound", "$libmain_dir/Fish/Vol/ConstantsFasound.pm") }
+
+]);
+
+$cmds->gitpull([
+    shell => 'git pull',
+    shell   => 'git submodule update --remote --recursive',
+]);
+
+$cmds->installconf([
+    shell => sprintf(qq, mkdir -p %s ,, shell_quote $g->modes->installconf->dir),
+    shell => sprintf(qq, cp conf %s/conf ,, shell_quote $g->modes->installconf->dir),
+]);
+
+$cmds->install([
+    perl    => sub { install(); 0 }, # sets $g->config vars
+    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/lib/fish_vol_xs.pm' %s ,, shell_quote $g->config->installsitelib },
+    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/blib/arch/auto/fish_vol_xs/fish_vol_xs.so' %s ,, shell_quote $g->config->installsitearch },
+    shell   => sub { mkdir qq, %s/Fish ,, shell_quote $g->config->installsitelib },
+    shell   => sub { sprintf qq, cp -ar 'libmain/Fish/Vol' %s/Fish ,, shell_quote $g->config->installsitelib },
+    shell    => sub { sprintf qq, cp -ar 'libextra/fish-lib-perl/Fish/'* %s/Fish ,, shell_quote $g->config->installsitelib },
+]);
+
+# - - - -
+
+my $mode = $g->mode;
+contains @MODES, $mode or 
+    error "Invalid mode:", BR $mode;
+
+go($cmds->$mode);
+
+exit;
+
+# - - - - 
+
+sub go {
+    my ($cmds) = @_;
+    my $n = chunk 2, $cmds;
+    while (my @v = $n->()) {
+        my ($executor, $what) = @v;
+        $what = $what->() if ref $what eq 'CODE';
+        $executor eq 'perl' ?
+            do_perl($what) :
+        $executor eq 'shell' ?
+            do_shell($what) :
+        ierror "Invalid:", BR $executor;
+    }
+}
+
+sub do_perl {
+    my ($p) = @_;
+    return unless strip_s $p;
+    info $p;
+    eval "$p; 1" or error d8 "Error: $@";
+}
+
+sub do_shell {
+    my ($c) = @_;
+    return unless strip_s $c;
+    sys_system $c;
+}
+
+# assume well-behaved args.
+sub chunk {
+    my ($n, $ary) = @_;
+    my $i = -1;
+    my $length = @$ary;
+    sub {
+        my @ret;
+        for my $j (1 .. $n) {
+            $i++;
+            if ($i == $length - 1) {
+                iwar 'j', $j, 'n', $n unless $j == $n;  #premature end
+            }
+            if ($i == $length) {
+                return; #done
+            }
+            push @ret, $ary->[$i];
+        }
+
+        @ret
+    }
+}
+
+sub get_usage {
+    my $s = "%s\n";
+    my $t = " %s » %s\n";
+
+    my $u = "Usage: $0 " . Y('<mode> ') . G('[opts]') . "\n\n";
+    $u .= sprintf $s, Y 'init'; 
+    $u .= sprintf $s, Y 'build'; 
+    $u .= sprintf $t, G '-c', 'make clean';
+    $u .= sprintf $s, Y 'gitpull'; 
+    $u .= sprintf $s, Y 'installconf'; 
+    $u .= sprintf $t, G '-d', "directory, defaults to " . BR $DEFAULT_CONF_DIR;
+
+    $u
+}
+
+sub install {
+    use Config;
+    #my $installarchlib = $Config{installarchlib};
+    #info Y 'installarchlib', $installarchlib;
+    my $installsitearch = $Config{installsitearch} 
+        or ierror;
+    my $installsitelib = $Config{installsitelib}
+        or ierror;
+    my $installsitebin = $Config{installsitebin}
+        or ierror;
+    info Y 'installsitearch', $installsitearch;
+    info Y 'installsitelib', $installsitelib;
+    info Y 'installsitebin', $installsitebin;
+    $g->config->installsitebin($installsitebin);
+    $g->config->installsitearch($installsitearch);
+    $g->config->installsitelib($installsitelib);
+}
+
+sub generate_fasound_constants {
+    my ($which_constants, $h_file, $package, $output) = @_;
+
+    my $f = $h_file;
+    my $fh = safeopen $f, { die => 0 } or iwar,
+        return;
+    my %need = map { $_ => 1 } @$which_constants;
+
+    my $fhw = safeopen ">$output", { die => 0 } or iwar,
+        return;
+    say $fhw "package $package;"; 
+
+    say $fhw "our %constants = (";
+    while (<$fh>) {
+        strip_s;
+        next unless m, ^ \# define \s+ (?<k> FASOUND_ \S+) \s+ (?<v> \S+) ,x;
+
+        my $k = $+{k};
+        my $v = $+{v};
+        $v = hex $v if $v =~ / ^ 0x\d+ $ /x;
+        #info sprintf 'Setting asound constant %s=%s', $k, $v if DEBUG;
+        delete $need{$k};
+        my $easy = lc $k =~ s/FASOUND_OPTIONS_//r;
+        #$g->fasound->$easy($v);
+        say $fhw "$easy => $v,";
+    }
+    say $fhw ");";
+    say $fhw "1;";
+
+    if (%need) {
+        iwar "Missing fasound constants:", join ', ', map { BR } keys %need;
+        return 0;
+    }
+
+    1
+}
+
