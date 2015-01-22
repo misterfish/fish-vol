@@ -117,7 +117,7 @@ $cmds->build([
     shell => 'make',
     perl => qq, chd "$pwd" ,,
 
-    perl => sub { generate_fasound_constants(\@FASOUND_CONSTANTS, $FASOUND_H, "Fish::Vol::ConstantsFasound", "$libmain_dir/Fish/Vol/ConstantsFasound.pm") }
+    perl => sub { generate_fasound_constants(\@FASOUND_CONSTANTS, $FASOUND_H, "Fish::Vol::ConstantsFasound", "$libmain_dir/Fish/Vol/ConstantsFasound.pm"); 0 }
 
 ]);
 
@@ -138,6 +138,7 @@ $cmds->install([
     shell   => sub { mkdir qq, %s/Fish ,, shell_quote $g->config->installsitelib },
     shell   => sub { sprintf qq, cp -ar 'libmain/Fish/Vol' %s/Fish ,, shell_quote $g->config->installsitelib },
     shell    => sub { sprintf qq, cp -ar 'libextra/fish-lib-perl/Fish/'* %s/Fish ,, shell_quote $g->config->installsitelib },
+    shell    => sub { sprintf qq, cp -ar fish-vol %s ,, shell_quote $g->config->installsitebin },
 ]);
 
 # - - - -
@@ -216,10 +217,10 @@ sub get_usage {
     $u
 }
 
+# - - - - 
+
 sub install {
     use Config;
-    #my $installarchlib = $Config{installarchlib};
-    #info Y 'installarchlib', $installarchlib;
     my $installsitearch = $Config{installsitearch} 
         or ierror;
     my $installsitelib = $Config{installsitelib}
@@ -257,7 +258,6 @@ sub generate_fasound_constants {
         #info sprintf 'Setting asound constant %s=%s', $k, $v if DEBUG;
         delete $need{$k};
         my $easy = lc $k =~ s/FASOUND_OPTIONS_//r;
-        #$g->fasound->$easy($v);
         say $fhw "$easy => $v,";
     }
     say $fhw ");";
