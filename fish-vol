@@ -8,8 +8,6 @@ my $script_dir;
 my $libmain_dir;
 my $libfish_dir;
 
-#my $ITER = 0;
-
 BEGIN {
     my $BIN_NAME = 'fish-vol';
 
@@ -19,16 +17,13 @@ BEGIN {
     $script_dir = dirname realpath $0;
     $libmain_dir = $script_dir . '/libmain';
     $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
-    #push @INC, $script_dir . '/../lib';
-    push @INC, $libmain_dir . '/fish_vol_xs/lib';
-
     push @INC, $_ for $libmain_dir, $libfish_dir;
 
+    push @INC, $libmain_dir . '/fish_vol_xs/lib';
     my @blib = qw,
         fish_vol_xs/blib/lib/auto/fish_vol_xs
         fish_vol_xs/blib/arch/auto/fish_vol_xs
     ,;
-
     push @INC, "$libmain_dir/$_" for @blib;
 
     $0 = $BIN_NAME;
@@ -53,10 +48,6 @@ use Glib;
 
 use Carp 'confess', 'cluck';
 use File::Temp;
-
-use Getopt::Long qw, :config
-    bundling no_ignore_case
-,;
 
 use List::Util qw, max min ,;
 
