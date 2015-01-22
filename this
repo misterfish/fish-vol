@@ -186,13 +186,14 @@ sub do_perl {
     my ($p) = @_;
     return unless strip_s $p;
     info $p;
-    eval "$p; 1" or error d8 "Error: $@";
+    eval "$p; 1" or 
+        ierror d8 "Error: $@";
 }
 
 sub do_shell {
     my ($c) = @_;
     return unless strip_s $c;
-    sys_system $c;
+    sys_system $c, { die => 1 };
 }
 
 # assume well-behaved args.
