@@ -119,8 +119,8 @@ $cmds->build([
     perl => qq, chd "$pwd" , ,
 
     perl => qq, chd 'libmain/fish_vol_xs' , ,
-    shell => sub { $g->modes->build->clean ? 'make clean' : '' },
     shell => 'perl Makefile.PL',
+    shell => sub { $g->modes->build->clean ? 'make clean' : '' },
     shell => 'make',
     perl => qq, chd "$pwd" ,,
 
@@ -287,7 +287,8 @@ sub install {
         $dirbin = $installvendorbin;
     }
 
-    $dirarch .= '/auto/Fish/Vol';
+    # XX
+    $dirarch .= '/auto/fish_vol_xs';
 
     info G 'arch dir', $dirarch;
     info G 'lib dir', $dirlib;
