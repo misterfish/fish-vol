@@ -144,8 +144,8 @@ $cmds->install([
     perl    => sub { install(); 0 }, # populates $g->install
     shell   => sub { sprintf(qq, mkdir -p %s ,, shell_quote $install->arch) },
     shell   => sub { sprintf(qq, mkdir -p %s ,, shell_quote $install->lib) },
+    shell   => sub { sprintf(qq, mkdir -p %s/Fish ,, shell_quote $install->lib) },
     shell   => sub { sprintf(qq, mkdir -p %s ,, shell_quote $install->bin) },
-    shell   => sub { sprintf(qq, mkdir -p %s/Fish ,, shell_quote $install->bin) },
     shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/lib/fish_vol_xs.pm' %s ,, shell_quote $install->lib },
     shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/blib/arch/auto/fish_vol_xs/fish_vol_xs.so' %s ,, shell_quote $install->arch },
     shell   => sub { mkdir qq, %s/Fish ,, shell_quote $install->lib },
