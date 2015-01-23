@@ -11,7 +11,9 @@ BEGIN {
     $script_dir = dirname $0;
     $libmain_dir = $script_dir . '/libmain';
     $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
-    push @INC, $_ for $libmain_dir, $libfish_dir;
+    # Make sure our subtree versions come before any globally installed
+    # versions, or submodule updates won't work right.
+    unshift @INC, $_ for $libmain_dir, $libfish_dir; 
     $0 = basename $0;
 }
 
@@ -22,9 +24,9 @@ use Config;
 
 use Fish::Opt 'opt';
 use Fish::Utility;
-use Fish::Utility_l qw, chd list contains,;
-Fish::Utility->verbose_cmds(1);
+use Fish::Utility_l qw, chd list contains ,;
 use Fish::Class 'o';
+Fish::Utility->verbose_cmds(1);
 
 # like natatime from List::MoreUtils
 sub chunk;
