@@ -55,6 +55,7 @@ use Fish::Utility;
 use Fish::Utility_l 'list', 'pushr', 'containsr', 'keysr', 'scalarr', 'slurpn';
 use Fish::Utility_m 'get_file_no', 'D', 'is_even';
 
+use Fish::Opt 'opt';
 use Fish::Socket::Server::unix;
 use Fish::Class 'class', 'o';
 use Fish::Iter 'iter';
@@ -108,20 +109,16 @@ my $DEFAULT_VOL = 50;
 
 my $USAGE = "Usage: $0 [-q for quiet] [-c conf_file, defaults to $CONF_FILE_DEFAULT] [-X for no graphics]";
 
-my %opts;
-
-GetOptions(
-    h   => \$opts{h},
-
-    c   => \$opts{c},
-    q   => \$opts{q},
-
-    X   => \$opts{X},
-) or error $USAGE;
+my $opt = opt {
+    h   => 'f',
+    c   => 'f',
+    q   => 'f',
+    X   => 'f',
+} or error $USAGE;
 
 error "Run as user.\n" if `whoami` eq "root"; 
 
-info($USAGE), exit if $opts{h};
+info($USAGE), exit if $opt->h;
 
 Fish::Utility_a->verbose_cmds(0);
 
@@ -132,7 +129,7 @@ if (DEBUG) {
 
 my $g = o(
     conf => undef,
-    conf_file => $opts{c} // $CONF_FILE_DEFAULT,
+    conf_file => $opt->c // $CONF_FILE_DEFAULT,
 
     srcs => [],
 
@@ -173,14 +170,14 @@ my $g = o(
 
 $g->conf(init_conf());
 # add listener XX
-$g->quiet($opts{q} // $g->conf->cb('quiet') // 0);
+$g->quiet($opt->q // $g->conf->cb('quiet') // 0);
 $g->conf->quiet($g->quiet);
 my $sock_path = $g->conf->cr('sock-path');
 $g->sock(
     Fish::Socket::Server::unix->new($sock_path),
 );
 
-if (not $opts{X}) {
+if (not $opt->X) {
     $g->do_osd(1);
     eval "use Fish::Vol::Osd; 1" or 
         die $@;
