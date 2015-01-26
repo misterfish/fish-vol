@@ -7,16 +7,19 @@ BEGIN {
     push @INC, dirname $0;
 }
 
+# Loaded dynamically (maybe) in constructor.
+# use X11::Aosd ':all';
+
 use Moo;
 use MooX::Types::MooseLike::Base ':all';
 
-use X11::Aosd ':all';
 use List::Util qw, min max ,;
 use Math::Trig ':pi';
 use Time::HiRes qw, time sleep ,;
 
 use Fish::Utility;
 use Fish::Utility_l 'list', 'is_defined', 'pushr';
+use Fish::Class 'o';
 
 use Fish::Vol::Utility;
 
@@ -152,6 +155,33 @@ around actual => sub {
     $self->$orig(@args);
 };
 
+my $g = o(
+    # If X11::Aosd could load.
+    ok => 0,
+
+    transparency_composite => -1,
+    transparency_fake => -1,
+    transparency_none => -1,
+    coordinate_center => -1,
+);
+
+{
+    my $ok = eval "use X11::Aosd";
+    if (not $ok) {
+        war "Unable to load X11::Aosd, OSD disabled. (Try -X to silence this warning.)";
+    }
+    else {
+        $g->ok(1);
+
+        $g->transparency_composite(X11::Aosd::TRANSPARENCY_COMPOSITE());
+        $g->transparency_fake(X11::Aosd::TRANSPARENCY_FAKE());
+        $g->transparency_none(X11::Aosd::TRANSPARENCY_NONE());
+        $g->coordinate_center(X11::Aosd::COORDINATE_CENTER());
+    }
+}
+
+sub ok { $g->ok }
+
 sub set {
 bench_start('set');
     my ($self, $val_perc) = @_;
@@ -213,8 +243,10 @@ sub hide {
 sub BUILD {
     my ($self, @args) = @_;
 
-    my $aosd = X11::Aosd->new;
-    $self->_aosd($aosd);
+    if ($g->ok) {
+        my $aosd = X11::Aosd->new;
+        $self->_aosd($aosd);
+    }
 }
 
 sub build {
@@ -225,15 +257,15 @@ sub build {
     my $tr = $self->transparency_type;
 
     $aosd->set_transparency(
-        $tr eq 'composite' ? TRANSPARENCY_COMPOSITE :
-        $tr eq 'fake' ? TRANSPARENCY_FAKE :
-        $tr eq 'none' ? TRANSPARENCY_NONE :
-        warreturn TRANSPARENCY_NONE, 'Unknown transparency type:', BR $tr
+        $tr eq 'composite' ? $g->transparency_composite :
+        $tr eq 'fake' ? $g->transparency_fake :
+        $tr eq 'none' ? $g->transparency_none :
+        warreturn $g->transparency_none, 'Unknown transparency type:', BR $tr
     );
 
     $aosd->set_position_with_offset(
-      COORDINATE_CENTER,
-      COORDINATE_CENTER,
+      $g->coordinate_center,
+      $g->coordinate_center,
       # actually width then height XX
       $self->height, $self->width, 
       0 + $self->col * $self->spacing_x, 

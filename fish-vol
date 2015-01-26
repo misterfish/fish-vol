@@ -178,9 +178,10 @@ $g->sock(
 );
 
 if (not $opt->X) {
-    $g->do_osd(1);
     eval "use Fish::Vol::Osd; 1" or 
         die $@;
+
+    $g->do_osd(1) if Fish::Vol::Osd->ok;
 }
 
 $g->cmds( Fish::Vol::Control->new(
