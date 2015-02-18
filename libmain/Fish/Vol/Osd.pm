@@ -166,7 +166,7 @@ my $g = o(
 );
 
 {
-    my $ok = eval "use X11::Aosd";
+    my $ok = eval "use X11::Aosd; 1";
     if (not $ok) {
         war "Unable to load X11::Aosd, OSD disabled. (Try -X to silence this warning.)";
     }
