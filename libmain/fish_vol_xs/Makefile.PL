@@ -48,14 +48,9 @@ WriteMakefile(
         MYEXTLIB    => "$fish_util_objs ../fish-lib-asound/fish-asound.o",
 );
 
-use constant DEFAULT_DEPS_DIR => '.deps';
-sub default_deps_dir { DEFAULT_DEPS_DIR }
-
 sub get_objs(_@) {
     my ($dir, $depsdir) = @_;
-    $depsdir //= default_deps_dir;
-    my $deps = "$dir/$depsdir";
-    my @s = sysll sprintf qq,find  "%s" -iname '*.o' -type f ,, shell_escape $deps or
+    my @s = sysll sprintf qq,find  "%s" -iname '*.o' -type f ,, shell_escape $dir or
         error "Nothing in dir", BR $deps;
     
     state $transform = sub { 
