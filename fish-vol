@@ -17,14 +17,14 @@ BEGIN {
     $script_dir = dirname realpath $0;
     $libmain_dir = $script_dir . '/libmain';
     $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
-    push @INC, $_ for $libmain_dir, $libfish_dir;
+    unshift @INC, $_ for $libmain_dir, $libfish_dir;
 
-    push @INC, $libmain_dir . '/fish_vol_xs/lib';
+    unshift @INC, $libmain_dir . '/fish_vol_xs/lib';
     my @blib = qw,
         fish_vol_xs/blib/lib/auto/fish_vol_xs
         fish_vol_xs/blib/arch/auto/fish_vol_xs
     ,;
-    push @INC, "$libmain_dir/$_" for @blib;
+    unshift @INC, "$libmain_dir/$_" for @blib;
 
     $0 = $BIN_NAME;
 }
