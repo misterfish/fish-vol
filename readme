@@ -1,0 +1,5 @@
+For debug:
+
+perl -Mconstant=DEBUG,1 vold 
+
+Also #define DEBUG in fasound.c.
