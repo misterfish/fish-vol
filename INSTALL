@@ -1,18 +1,33 @@
 # After cloning:
 git submodule init
-git submodule update --remote --recursive
+git submodule update --recursive
 
 Then:
 
-./this -h 
- To see options.
+./build -h 
+  To see options.
 
 Quick start:
 
-./this init
-./this build -c
-./this installconf 
- By default, the conf file is installed in ~/.local/share/fish-vol
-./this install [-p prefix]
- Will probably need sudo, or -p.
+./build init
+./build build -c
+./build installconf 
+  By default, the conf file is installed in ~/.local/share/fish-vol
+
+Now the program should be runnable:
+
+./fish-vol
+
+You can also symlink, for example in /usr/local/bin:
+
+sudo ln -s "$(pwd -P)"/fish-vol /usr/local/bin
+
+The following step is not necessary, but you can use it to install the
+libraries and binaries to standard system locations. The main problem with
+this approach is that it's difficult to undo (and we don't even try to help
+you).
+
+./build install [-p prefix]
+
+  You will probably need sudo, or -p.
 

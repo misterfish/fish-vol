@@ -102,11 +102,11 @@ $cmds->init([
     # These first two commands have to be executed manually by the user, or
     # else this script won't run. Ok if they're here, too.
     shell   => 'git submodule init',
-    shell   => 'git submodule update --remote --recursive',
+    shell   => 'git submodule update --recursive',
     perl    => qq, chd 'libmain/fish-lib-asound' ,,
     shell   => 'git submodule init',
     perl    => qq, chd '../..',,
-    shell   => 'git submodule update --remote --recursive',
+    shell   => 'git submodule update --recursive',
 ]);
 
 $cmds->build([
@@ -133,7 +133,7 @@ $cmds->build([
 
 $cmds->gitpull([
     shell => 'git pull',
-    shell   => 'git submodule update --remote --recursive',
+    shell   => 'git submodule update --recursive',
 ]);
 
 $cmds->installconf([
