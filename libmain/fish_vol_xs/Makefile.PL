@@ -50,7 +50,7 @@ WriteMakefile(
 
 sub get_objs(_@) {
     my ($dir, $depsdir) = @_;
-    my @s = sysll sprintf qq,find  "%s" -iname '*.o' -type f ,, shell_escape $dir or
+    my @s = sysll sprintf qq,find  "%s" -iname '*.o' -type f ,, shell_quote $dir or
         error "Nothing in dir", BR $dir;
     
     state $transform = sub { 
