@@ -1,0 +1,9 @@
+[submodule "libextra/fish-lib-asound"]
+	path = libextra/fish-lib-asound
+	url = https://github.com/misterfish/fish-lib-asound
+[submodule "libextra/fish-lib-perl"]
+	path = libextra/fish-lib-perl
+	url = https://github.com/misterfish/fish-lib-perl
+[submodule "libextra/fish-lib-util"]
+	path = libextra/fish-lib-util
+	url = https://github.com/misterfish/fish-lib-util
