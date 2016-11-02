@@ -40,13 +40,6 @@ my @FASOUND_CONSTANTS = qw,
     FASOUND_OPTIONS_QUIET
 ,;
 
-# From man perlport, with additions. Not ideal.
-my @ARCH_NAMES_UNIX = qw, 
-    aix alpha arm armv5tel BePC CRAY darwin freebsd
-    i386 i586 i86pc irix next OPENSTEP
-    PA-RISC1.1 ppc-linux RM400 sun4 t3e x86
-,;
-
 my $USAGE = get_usage();
 
 my $opt = opt {
@@ -65,15 +58,8 @@ my $g = o(
         build => o(
             clean => $opt->c // 0,
         ),
-        gitpull => o(),
         installconf => o(
             dir => $opt->d // $DEFAULT_CONF_DIR,
-        ),
-        install => o(
-            prefix => $opt->p // undef,
-            lib => undef,
-            arch => undef,
-            bin => undef,
         ),
     ),
 );
@@ -81,8 +67,7 @@ my $g = o(
 error $USAGE if @ARGV;
 
 my @MODES = qw,
-    init build gitpull
-    installconf install
+    init build installconf
 ,;
 
 my $home = $ENV{HOME} or error "Need to set env variable HOME";
@@ -93,9 +78,7 @@ chd $script_dir;
 my $cmds = o(
     init => [],
     build => [],
-    gitpull => [],
     installconf => [],
-    install => [],
 );
 
 # - - -
@@ -133,29 +116,9 @@ $cmds->build([
 
 ]);
 
-$cmds->gitpull([
-    shell => 'git pull',
-    shell   => 'git submodule update --recursive',
-]);
-
 $cmds->installconf([
     shell => sprintf(qq, mkdir -p %s ,, shell_quote $g->modes->installconf->dir),
     shell => sprintf(qq, cp conf %s/conf ,, shell_quote $g->modes->installconf->dir),
-]);
-
-my $install = $g->modes->install;
-$cmds->install([
-    perl    => sub { install(); 0 }, # populates $g->install
-    shell   => sub { sprintf(qq, mkdir -p %s ,, shell_quote $install->arch) },
-    shell   => sub { sprintf(qq, mkdir -p %s ,, shell_quote $install->lib) },
-    shell   => sub { sprintf(qq, mkdir -p %s/Fish ,, shell_quote $install->lib) },
-    shell   => sub { sprintf(qq, mkdir -p %s ,, shell_quote $install->bin) },
-    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/lib/fish_vol_xs.pm' %s ,, shell_quote $install->lib },
-    shell   => sub { sprintf qq, cp 'libmain/fish_vol_xs/blib/arch/auto/fish_vol_xs/fish_vol_xs.so' %s ,, shell_quote $install->arch },
-    shell   => sub { mkdir qq, %s/Fish ,, shell_quote $install->lib },
-    shell   => sub { sprintf qq, cp -ar 'libmain/Fish/Vol' %s/Fish ,, shell_quote $install->lib },
-    shell    => sub { sprintf qq, cp -ar 'libextra/fish-lib-perl/Fish/'* %s/Fish ,, shell_quote $install->lib },
-    shell    => sub { sprintf qq, cp -ar fish-vol %s ,, shell_quote $install->bin },
 ]);
 
 # - - - -
@@ -232,78 +195,11 @@ sub get_usage {
     $u .= sprintf $t, G  '-c', 'make clean';
     $u .= sprintf $s, Y 'installconf'; 
     $u .= sprintf $t, G  '-d', "directory, defaults to " . BR $DEFAULT_CONF_DIR;
-    $u .= sprintf $s, Y 'install'; 
-    $u .= sprintf $t, G  '-p', "prefix, or else installed by default to " . Y 'installsitearch', ', ', Y  'installsitelib', ' ', Y 'installsitebin';
-    $u .= "---\n";
-    $u .= sprintf $s, Y 'gitpull'; 
 
     $u
 }
 
 # - - - - 
-
-sub install {
-
-    my $installvendorarch;
-    my $installvendorlib;
-    my $installvendorbin;
-
-    my $dirarch;
-    my $dirlib;
-    my $dirbin;
-
-    my $install = $g->modes->install;
-
-    if (my $pref = $install->prefix) {
-        $installvendorarch = $Config{installvendorarch} 
-            or ierror;
-
-        my $arch;
-        # Find the first thing that looks like an arch name. Not ideal, but
-        # don't know another way. 
-        # uname -a and $^O are no good.
-        SPLIT:
-        for (split m, / ,x, $installvendorarch) {
-            for my $s (@ARCH_NAMES_UNIX) {
-                if (m, ^ $s ,x) {
-                    $arch = $_;
-                    info "Got arch:", Y $arch;
-                    last SPLIT;
-                }
-            }
-        }
-        ierror "Couldn't determine arch" unless $arch;
-        my $version = $Config{version} or 
-            ierror "Couldn't determine version";
-        $dirarch = "$pref/lib/perl5/$version/$arch";
-        $dirlib = "$pref/lib/perl5";
-        $dirbin = "$pref/bin";
-    }
-    else {
-        $installvendorarch = $Config{installvendorarch} 
-            or ierror;
-        $installvendorlib = $Config{installvendorlib}
-            or ierror;
-        $installvendorbin = $Config{installvendorbin}
-            or ierror;
-        info Y 'installvendorarch', $installvendorarch;
-        info Y 'installvendorlib', $installvendorlib;
-        info Y 'installvendorbin', $installvendorbin;
-        $dirarch = $installvendorarch;
-        $dirlib = $installvendorlib;
-        $dirbin = $installvendorbin;
-    }
-
-    # XX
-    $dirarch .= '/auto/fish_vol_xs';
-
-    info G 'arch dir', $dirarch;
-    info G 'lib dir', $dirlib;
-    info G 'bin dir', $dirbin;
-    $install->bin($dirbin);
-    $install->arch($dirarch);
-    $install->lib($dirlib);
-}
 
 sub generate_fasound_constants {
     my ($which_constants, $h_file, $package, $output) = @_;
