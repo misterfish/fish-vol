@@ -1,9 +1,0 @@
-[submodule "libmain/fish-lib-util"]
-	path = libmain/fish-lib-util
-	url = ssh://git@github.com/misterfish/fish-lib-util
-[submodule "libmain/fish-lib-asound"]
-	path = libmain/fish-lib-asound
-	url = ssh://git@github.com/misterfish/fish-lib-asound
-[submodule "libextra/fish-lib-perl"]
-	path = libextra/fish-lib-perl
-	url = ssh://git@github.com/misterfish/fish-lib-perl
