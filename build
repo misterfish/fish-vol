@@ -4,13 +4,15 @@ use 5.18.0;
 
 our $script_dir;
 our $libmain_dir;
+our $libextra_dir;
 our $libfish_dir;
 
 BEGIN {
     use File::Basename;
     $script_dir = dirname $0;
     $libmain_dir = $script_dir . '/libmain';
-    $libfish_dir = $script_dir . '/libextra/fish-lib-perl';
+    $libextra_dir = $script_dir . '/libextra';
+    $libfish_dir = $libextra_dir . '/fish-lib-perl';
     # Make sure our subtree versions come before any globally installed
     # versions, or submodule updates won't work right.
     unshift @INC, $_ for $libmain_dir, $libfish_dir; 
@@ -33,7 +35,7 @@ sub chunk;
 sub get_default_dir;
 
 my $DEFAULT_CONF_DIR = $ENV{HOME} . '/.local/share/fish-vol';
-my $FASOUND_H = $libmain_dir . '/fish-lib-asound/fish-asound.h';
+my $FASOUND_H = $libextra_dir . '/fish-lib-asound/fish-asound.h';
 my @FASOUND_CONSTANTS = qw,
     FASOUND_OPTIONS_QUIET
 ,;
@@ -103,19 +105,19 @@ $cmds->init([
     # else this script won't run. Ok if they're here, too.
     shell   => 'git submodule init',
     shell   => 'git submodule update --recursive',
-    perl    => qq, chd 'libmain/fish-lib-asound' ,,
+    perl    => qq, chd 'libextra/fish-lib-asound' ,,
     shell   => 'git submodule init',
     perl    => qq, chd '../..',,
     shell   => 'git submodule update --recursive',
 ]);
 
 $cmds->build([
-    perl => qq, chd 'libmain/fish-lib-asound' , ,
+    perl => qq, chd 'libextra/fish-lib-asound' , ,
     shell => sub { $g->modes->build->clean ? 'make clean' : '' },
     shell => 'make',
     perl => qq, chd "$pwd" , ,
 
-    perl => qq, chd 'libmain/fish-lib-util/fish-util' , ,
+    perl => qq, chd 'libextra/fish-lib-util/fish-util' , ,
     shell => sub { $g->modes->build->clean ? 'make clean' : '' },
     shell => 'make',
     perl => qq, chd "$pwd" , ,

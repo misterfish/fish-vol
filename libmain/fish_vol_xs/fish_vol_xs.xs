@@ -9,7 +9,7 @@
  * but, we want MAX_ constants.
  */
 
-#include "../fish-lib-asound/fish-asound.h"
+#include "../../libextra/fish-lib-asound/fish-asound.h"
 
 MODULE = fish_vol_xs		PACKAGE = fish_vol_xs		
 
@@ -25,13 +25,13 @@ AV*
 xs_init(options)
         int options
     CODE:
-        int m = MAX_SOUND_CARDS;
-        int n = MAX_ELEMS;
-        int o = MAX_FDS;
-        const char *card_names_hw[MAX_SOUND_CARDS] = {0};
-        const char *card_names_string[MAX_SOUND_CARDS] = {0};
-        const char *ctl_names[MAX_SOUND_CARDS][MAX_ELEMS] = {0};
-        int fds[MAX_SOUND_CARDS][MAX_FDS] = {0};
+        int m = FASOUND_MAX_SOUND_CARDS;
+        int n = FASOUND_MAX_ELEMS;
+        int o = FASOUND_MAX_FDS;
+        const char *card_names_hw[FASOUND_MAX_SOUND_CARDS] = {0};
+        const char *card_names_string[FASOUND_MAX_SOUND_CARDS] = {0};
+        const char *ctl_names[FASOUND_MAX_SOUND_CARDS][FASOUND_MAX_ELEMS] = {0};
+        int fds[FASOUND_MAX_SOUND_CARDS][FASOUND_MAX_FDS] = {0};
 
         RETVAL = newAV();
         sv_2mortal((SV*)RETVAL);
@@ -57,11 +57,11 @@ xs_init(options)
 
             int size;
 
-            size = strnlen(card_name_hw, MAX_CARD_NAME_HW_SIZE) == MAX_CARD_NAME_HW_SIZE ? MAX_CARD_NAME_HW_SIZE : 0; // 0 means let them do it for us
+            size = strnlen(card_name_hw, FASOUND_MAX_CARD_NAME_HW_SIZE) == FASOUND_MAX_CARD_NAME_HW_SIZE ? FASOUND_MAX_CARD_NAME_HW_SIZE : 0; // 0 means let them do it for us
             SV *card_name_hw_sv = newSVpv(card_name_hw, size);
             av_push(card_av, card_name_hw_sv);
 
-            size = strnlen(card_name_string, MAX_CARD_NAME_STRING_SIZE) == MAX_CARD_NAME_STRING_SIZE ? MAX_CARD_NAME_STRING_SIZE : 0; // 0 means let them do it for us
+            size = strnlen(card_name_string, FASOUND_MAX_CARD_NAME_STRING_SIZE) == FASOUND_MAX_CARD_NAME_STRING_SIZE ? FASOUND_MAX_CARD_NAME_STRING_SIZE : 0; // 0 means let them do it for us
             SV *card_name_string_sv = newSVpv(card_name_string, size);
             av_push(card_av, card_name_string_sv);
 
@@ -70,7 +70,7 @@ xs_init(options)
                 const char *ctl_name = ctl_names[i][j];
                 if (! ctl_name) 
                     continue;
-                int size = strnlen(ctl_name, MAX_ELEM_NAME_SIZE) == MAX_ELEM_NAME_SIZE ? MAX_ELEM_NAME_SIZE : 0;
+                int size = strnlen(ctl_name, FASOUND_MAX_ELEM_NAME_SIZE) == FASOUND_MAX_ELEM_NAME_SIZE ? FASOUND_MAX_ELEM_NAME_SIZE : 0;
                 SV *sv = newSVpv(ctl_name, size);
                 av_push(ctl_av, sv);
             }
@@ -97,7 +97,7 @@ xs_set(card_idx, ctl_idx, val_perc)
         int ctl_idx 
         double val_perc
     CODE:
-        RETVAL = fasound_set(card_idx, ctl_idx, val_perc);
+        RETVAL = fasound_set(card_idx, ctl_idx, FASOUND_CHAN_ALL, val_perc);
     OUTPUT:
         RETVAL
 
@@ -107,7 +107,7 @@ xs_set_rel(card_idx, ctl_idx, delta_perc)
         int ctl_idx 
         int delta_perc
     CODE:
-        RETVAL = fasound_set_rel(card_idx, ctl_idx, delta_perc);
+        RETVAL = fasound_set_rel(card_idx, ctl_idx, FASOUND_CHAN_ALL, delta_perc);
     OUTPUT:
         RETVAL
 
